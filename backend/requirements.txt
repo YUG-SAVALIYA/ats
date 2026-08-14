@@ -11,3 +11,7 @@ websockets
 pandas
 pytz
 apscheduler
+holidays
+PyJWT
+bcrypt
+cryptography
