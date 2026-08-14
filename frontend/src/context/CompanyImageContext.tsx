@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { api } from '../services/api';
 
+import { API_BASE } from '../services/api';
+
 type CompanyImageContextType = Record<string, string>;
 
 const CompanyImageContext = createContext<CompanyImageContextType>({});
@@ -9,9 +11,7 @@ export const CompanyImageProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [images, setImages] = useState<CompanyImageContextType>({});
 
   useEffect(() => {
-    // We add a custom API call here directly or through api service.
-    // For simplicity, we just fetch it here.
-    fetch('http://localhost:8000/api/companies/images')
+    fetch(`${API_BASE}/companies/images`)
       .then(res => res.json())
       .then(data => {
         setImages(data || {});
