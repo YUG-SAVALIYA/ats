@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+requests
+pyotp
+dhanhq
+sqlalchemy
+psycopg2-binary
+pydantic
+python-dotenv
+websockets
+pandas
+pytz
+apscheduler
