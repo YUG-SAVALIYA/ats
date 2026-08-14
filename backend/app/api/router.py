@@ -26,7 +26,10 @@ from app.core.engine import get_trade_engine
 from app.core.executor import get_order_executor
 from app.core.cache_manager import get_cache_manager
 
-router = APIRouter(prefix="/api")
+from fastapi import APIRouter, HTTPException, Query, Depends
+from app.api.auth_app import get_current_user
+
+router = APIRouter(prefix="/api", dependencies=[Depends(get_current_user)])
 portfolio_service = PortfolioService()
 
 

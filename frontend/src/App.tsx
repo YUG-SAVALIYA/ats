@@ -21,6 +21,7 @@ import { SignalsTable } from './components/SignalsTable';
 import { PositionsTable } from './components/PositionsTable';
 import { HoldingsTable } from './components/HoldingsTable';
 import { OrderBookTable } from './components/OrderBookTable';
+import { LockScreen } from './pages/LockScreen';
 import { Layers, FileText, History, Database } from 'lucide-react';
 
 function AppContent() {
@@ -341,7 +342,10 @@ export function App() {
   return (
     <CompanyImageProvider>
       <ToastProvider>
-        <AppContent />
+        <Routes>
+          <Route path="/lock" element={<LockScreen />} />
+          <Route path="/*" element={<AppContent />} />
+        </Routes>
       </ToastProvider>
     </CompanyImageProvider>
   );

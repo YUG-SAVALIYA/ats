@@ -3,7 +3,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime
 
-from app.services.candle_sync import sync_all_active_companies
+from app.services.candle_sync import sync_all_active_companies, sync_actionable_companies
 from app.services.market_calendar import is_trading_day
 from app.services.holiday_manager import fetch_and_store_holidays
 
@@ -13,18 +13,18 @@ scheduler = BackgroundScheduler()
 
 
 def scheduled_candle_sync():
-    """Checks if today is a trading day before running candle sync."""
+    """Checks if today is a trading day before running fast candle sync at 3:20 PM."""
     now = datetime.now()
     if not is_trading_day(now.date()):
         logger.info(f"[SCHEDULER] Skipping candle sync because {now.date()} is not a trading day.")
         return
         
-    logger.info("[SCHEDULER] Triggering scheduled candle sync...")
+    logger.info("[SCHEDULER] Triggering scheduled fast actionable candle sync...")
     try:
-        result = sync_all_active_companies(limit=4000)
-        logger.info(f"[SCHEDULER] Scheduled sync complete: {result}")
+        result = sync_actionable_companies()
+        logger.info(f"[SCHEDULER] Scheduled fast sync complete: {result}")
     except Exception as exc:
-        logger.error(f"[SCHEDULER] Scheduled sync failed: {exc}")
+        logger.error(f"[SCHEDULER] Scheduled fast sync failed: {exc}")
 
 
 def scheduled_325_execution():
@@ -54,6 +54,10 @@ def scheduled_post_market_scan():
 
     logger.info("[SCHEDULER] Triggering post-market signal scan...")
     try:
+        # First, ensure we have all today's candles for all active companies
+        logger.info("[SCHEDULER] Running full candle sync before signal scan...")
+        sync_all_active_companies(limit=4000)
+        
         from app.services.strategy import get_strategy_engine
         engine = get_strategy_engine()
         new_signals = engine.scan_signals_from_db()
@@ -69,6 +73,21 @@ def scheduled_holiday_update():
     fetch_and_store_holidays(next_year)
     import app.services.market_calendar as mc
     mc._cache_populated = False
+
+
+def scheduled_full_candle_sync():
+    """Checks if today is a trading day before running full candle sync at 10:00 PM."""
+    now = datetime.now()
+    if not is_trading_day(now.date()):
+        logger.info(f"[SCHEDULER] Skipping full candle sync because {now.date()} is not a trading day.")
+        return
+        
+    logger.info("[SCHEDULER] Triggering scheduled full candle sync...")
+    try:
+        result = sync_all_active_companies(limit=4000)
+        logger.info(f"[SCHEDULER] Scheduled full sync complete: {result}")
+    except Exception as exc:
+        logger.error(f"[SCHEDULER] Scheduled full sync failed: {exc}")
 
 
 def start_scheduler():
@@ -101,7 +120,7 @@ def start_scheduler():
     )
     
     scheduler.add_job(
-        scheduled_candle_sync,
+        scheduled_full_candle_sync,
         trigger=CronTrigger(day_of_week='mon-fri', hour=22, minute=0),
         id='sync_candles_2200',
         name='Candle Sync at 10:00 PM',

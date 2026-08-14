@@ -52,7 +52,15 @@ class DhanAuthManager:
                     decrypted_tok = decrypt_token(cred.access_token)
                     if decrypted_tok and len(decrypted_tok) >= 20:
                         self._cached_token = decrypted_tok
-                        self._token_expiry_ms = int(time.time() * 1000) + _TOKEN_VALIDITY_MS
+                        # Calculate accurate expiry based on DB updated_at
+                        if cred.updated_at:
+                            from datetime import timezone
+                            now_utc = datetime.now(timezone.utc)
+                            upd_utc = cred.updated_at if cred.updated_at.tzinfo else cred.updated_at.replace(tzinfo=timezone.utc)
+                            token_age_ms = (now_utc - upd_utc).total_seconds() * 1000
+                            self._token_expiry_ms = int(time.time() * 1000) + max(0, _TOKEN_VALIDITY_MS - token_age_ms)
+                        else:
+                            self._token_expiry_ms = int(time.time() * 1000) + _TOKEN_VALIDITY_MS
                 if cred.pin:
                     self.pin = decrypt_token(cred.pin) or ""
                 if cred.totp_secret:
@@ -91,7 +99,6 @@ class DhanAuthManager:
                     cred.pin = encrypted_pin
                 if encrypted_totp:
                     cred.totp_secret = encrypted_totp
-                cred.updated_at = datetime.utcnow()
 
             db.commit()
             logger.info("All broker credentials (PIN, TOTP secret, token) encrypted & stored in `creds` DB table for client %s", self.client_id)

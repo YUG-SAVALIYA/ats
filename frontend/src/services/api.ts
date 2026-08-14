@@ -12,13 +12,21 @@ import {
 const API_BASE = '/api';
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+  const token = localStorage.getItem('ats_admin_token');
   const res = await fetch(`${API_BASE}${url}`, {
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
       ...options?.headers,
     },
     ...options,
   });
+
+  if (res.status === 401) {
+    localStorage.removeItem('ats_admin_token');
+    window.location.href = '/lock';
+    throw new Error('Unauthorized');
+  }
 
   let data: any;
   try {

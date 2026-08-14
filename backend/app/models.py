@@ -419,3 +419,13 @@ class OrderAttempt(Base):
 
     trade = relationship("Trade", backref="order_attempts")
     ats_order = relationship("AtsOrder", backref="attempts")
+
+
+class AppConfig(Base):
+    """Stores application-wide configuration like the encrypted master password."""
+    __tablename__ = "app_config"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    config_key = Column(String(128), index=True, nullable=False, unique=True)
+    config_value = Column(Text, nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)

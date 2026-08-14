@@ -93,7 +93,10 @@ class MarketFeedManager:
             finally:
                 db.close()
 
-        if self._ws:
+        if not self._running:
+            logger.info(f"[WS] Auto-starting market feed to subscribe to {new_ids}")
+            await self.start()
+        elif self._ws:
             await self._send_subscription(list(self._subscribed_ids))
             logger.info(f"[WS] Subscribed to {new_ids}")
 
@@ -121,7 +124,10 @@ class MarketFeedManager:
                 finally:
                     db.close()
 
-        if self._ws and self._subscribed_ids:
+        if not self._subscribed_ids:
+            logger.info("[WS] No active subscriptions remaining. Shutting down market feed WebSocket.")
+            await self.stop()
+        elif self._ws:
             await self._send_subscription(list(self._subscribed_ids))
 
     @property

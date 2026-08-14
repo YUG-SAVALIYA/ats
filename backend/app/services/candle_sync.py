@@ -193,6 +193,77 @@ def sync_candles_for_company(
     return {"daily_inserted": daily_inserted, "weekly_inserted": weekly_inserted, "skipped": False}
 
 
+def sync_actionable_companies(delay_sec: float = SYMBOL_FETCH_DELAY_SEC) -> Dict[str, Any]:
+    """
+    Checks missing candles and fetches updates ONLY for companies that have an active signal
+    or an open/pending trade. This is intended for the 3:20 PM fast sync.
+    """
+    logger.info(f"[CANDLE SYNC] Starting fast actionable candle sync...")
+    from app.models import Signal, Trade
+    db = SessionLocal()
+    try:
+        # Get companies with active signals
+        signal_comp_ids = [r[0] for r in db.query(Signal.company_id).filter(Signal.status == "ACTIVE").all()]
+        
+        # Get companies with open or pending trades
+        trade_comp_ids = [r[0] for r in db.query(Trade.company_id).filter(Trade.status.in_(["OPEN", "ENTRY_PENDING", "EXIT_PENDING"])).all()]
+        
+        actionable_ids = set(signal_comp_ids + trade_comp_ids)
+        
+        if not actionable_ids:
+            logger.info("[CANDLE SYNC] No actionable companies found for fast sync.")
+            return {"total_active_companies": 0, "companies_synced": 0}
+
+        companies = (
+            db.query(Company)
+            .filter(
+                Company.id.in_(actionable_ids),
+                Company.is_active == True,
+                Company.dhan_security_id != None,
+                Company.dhan_security_id != ""
+            )
+            .all()
+        )
+    finally:
+        db.close()
+
+    total_daily = 0
+    total_weekly = 0
+    synced = 0
+    skipped = 0
+
+    for company in companies:
+        try:
+            result = sync_candles_for_company(
+                company_id=company.id,
+                security_id=company.dhan_security_id,
+                exchange_segment="NSE_EQ"
+            )
+            if result.get("skipped"):
+                skipped += 1
+            else:
+                total_daily += result.get("daily_inserted", 0)
+                total_weekly += result.get("weekly_inserted", 0)
+                synced += 1
+
+            if delay_sec > 0:
+                time.sleep(delay_sec)
+
+        except Exception as exc:
+            logger.warning(f"[CANDLE SYNC] Skipping {company.trading_symbol}: {exc}")
+
+    summary = {
+        "total_actionable_companies": len(companies),
+        "companies_synced": synced,
+        "companies_skipped_up_to_date": skipped,
+        "daily_candles_inserted": total_daily,
+        "weekly_candles_inserted": total_weekly,
+        "rate_limit_delay_sec": delay_sec
+    }
+    logger.info(f"[CANDLE SYNC] Fast actionable sync complete: {summary}")
+    return summary
+
+
 def sync_all_active_companies(limit: int = 4000, delay_sec: float = SYMBOL_FETCH_DELAY_SEC) -> Dict[str, Any]:
     """
     Checks missing candles and fetches updates for all active companies with a strict 0.3s rate limit per symbol.

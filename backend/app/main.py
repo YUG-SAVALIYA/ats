@@ -143,10 +143,11 @@ async def lifespan(app: FastAPI):
         db.close()
 
     if active_ids:
+        logger.info(f"[STARTUP] Found {len(active_ids)} active trades. Starting websocket feed...")
         await ws_manager.subscribe(list(active_ids))
-        logger.info(f"[STARTUP] Subscribed {len(active_ids)} securities to WebSocket feed after broker sync: {active_ids}")
+    else:
+        logger.info("[STARTUP] No active trades found. WebSocket feed will remain idle until needed.")
 
-    await ws_manager.start()
     logger.info(f"[STARTUP] TradeEngine started — {recovered_count} active trade(s) recovered and broker-reconciled.")
 
     # 3. Pending order fill reconciler (polls Dhan every 5s for ENTRY_PENDING)
@@ -258,6 +259,8 @@ async def log_requests(request: Request, call_next):
     return response
 
 
+from app.api.auth_app import router as auth_router
+app.include_router(auth_router)
 app.include_router(api_router)
 
 
