@@ -30,6 +30,16 @@ router = APIRouter(prefix="/api")
 portfolio_service = PortfolioService()
 
 
+def assert_success(result: Any) -> Any:
+    """Raises an HTTPException if the result dictionary indicates a failure."""
+    if isinstance(result, dict):
+        status = str(result.get("status", "")).lower()
+        if status in ("failed", "error", "failure", "cancel_failed", "invalid_state"):
+            msg = result.get("error") or result.get("message") or result.get("remarks") or f"Operation failed with status: {status}"
+            raise HTTPException(status_code=400, detail=str(msg))
+    return result
+
+
 class ToggleEngineRequest(BaseModel):
     enabled: bool
 
@@ -150,7 +160,7 @@ async def trigger_broker_reconciliation_api():
         from app.core.broker_reconciler import get_broker_reconciler
         reconciler = get_broker_reconciler()
         res = await reconciler.reconcile_cycle(is_startup=False)
-        return res
+        return assert_success(res)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Broker reconciliation failed: {exc}")
 
@@ -232,7 +242,7 @@ def manual_trade_entry(payload: ManualEntryRequest):
             allocated_capital=payload.allocated_capital,
             product_type=payload.product_type,
         )
-        return result
+        return assert_success(result)
     except HTTPException:
         raise
     except Exception as exc:
@@ -244,9 +254,9 @@ def cancel_pending_trade_entry(trade_id: str):
     try:
         executor = get_order_executor()
         result = executor.cancel_pending_entry(trade_id, reason="OPERATOR_CANCEL")
-        if result["status"] in ("not_found",):
+        if result.get("status") in ("not_found",):
             raise HTTPException(status_code=404, detail=result["message"])
-        return result
+        return assert_success(result)
     except HTTPException:
         raise
     except Exception as exc:
@@ -407,7 +417,7 @@ def get_company_images():
 def trigger_candle_sync(limit: int = Query(50)):
     try:
         result = sync_all_active_companies(limit=limit)
-        return {"status": "sync_complete", **result}
+        return assert_success({"status": "sync_complete", **result})
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Candle sync failed: {exc}")
 
@@ -426,7 +436,7 @@ def trigger_candle_sync_single(symbol: str):
             security_id=company.dhan_security_id,
             exchange_segment="NSE_EQ",
         )
-        return {"status": "sync_complete", "symbol": symbol, **result}
+        return assert_success({"status": "sync_complete", "symbol": symbol, **result})
     except HTTPException:
         raise
     except Exception as exc:
