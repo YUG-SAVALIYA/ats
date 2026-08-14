@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Lock, Unlock, KeyRound, ShieldCheck } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
+import { API_BASE } from '../services/api';
 
 export function LockScreen() {
   const [isSetupMode, setIsSetupMode] = useState<boolean | null>(null);
@@ -11,13 +12,18 @@ export function LockScreen() {
 
   useEffect(() => {
     // Check if password is set up
-    fetch('/api/app-auth/status')
-      .then(res => res.json())
+    fetch(`${API_BASE}/app-auth/status`)
+      .then(res => {
+        if (!res.ok) throw new Error('Backend offline');
+        return res.json();
+      })
       .then(data => {
         setIsSetupMode(!data.is_setup);
       })
       .catch(err => {
         addToast('Failed to connect to backend', 'error');
+        // Stop spinning if it fails
+        setIsSetupMode(true); 
       });
   }, [addToast]);
 
@@ -40,7 +46,7 @@ export function LockScreen() {
 
     try {
       if (isSetupMode) {
-        const res = await fetch('/api/app-auth/setup', {
+        const res = await fetch(`${API_BASE}/app-auth/setup`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password })
@@ -56,7 +62,7 @@ export function LockScreen() {
         setPassword('');
         setConfirmPassword('');
       } else {
-        const res = await fetch('/api/app-auth/login', {
+        const res = await fetch(`${API_BASE}/app-auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password })
