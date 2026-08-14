@@ -9,7 +9,10 @@ import {
   StockMasterItem,
 } from '../types';
 
-const API_BASE = '/api';
+// If VITE_BACKEND_URL is provided in .env, it will use that explicit domain/port.
+// Otherwise, it intelligently falls back to relative '/api' for unified hosting.
+const env = (import.meta as any).env;
+const API_BASE = env.VITE_BACKEND_URL ? `${env.VITE_BACKEND_URL}/api` : '/api';
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const token = localStorage.getItem('ats_admin_token');

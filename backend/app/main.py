@@ -14,7 +14,7 @@ import uvicorn
 import logging
 from datetime import datetime
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Request
 
@@ -242,9 +242,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+frontend_url = os.getenv("FRONTEND_URL")
+allowed_origins = [frontend_url] if frontend_url else ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -264,15 +267,39 @@ app.include_router(auth_router)
 app.include_router(api_router)
 
 
-@app.get("/")
-def root():
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+# Mount the static assets directory from the frontend dist folder
+FRONTEND_DIST = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
+ASSETS_DIR = os.path.join(FRONTEND_DIST, "assets")
+
+# Only mount /assets if the directory exists (to prevent startup errors if not built yet)
+if os.path.isdir(ASSETS_DIR):
+    app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
+
+@app.get("/{full_path:path}")
+async def serve_frontend(full_path: str):
+    """
+    Catch-all route for the React SPA. 
+    Serves static files if they exist, otherwise serves index.html for client-side routing.
+    """
+    # Don't intercept API requests if they somehow bypassed the routers
+    if full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="API route not found")
+        
+    file_path = os.path.join(FRONTEND_DIST, full_path)
+    if os.path.isfile(file_path) and full_path != "":
+        return FileResponse(file_path)
+        
+    index_path = os.path.join(FRONTEND_DIST, "index.html")
+    if os.path.isfile(index_path):
+        return FileResponse(index_path)
+        
     return {
         "platform": "ATS — Automated Trading System",
         "status": "online",
-        "architecture_rating": "10/10",
-        "mode": "LIVE_MARKET_ORDERS_ONLY",
-        "version": "2.1.0",
-        "docs": "/docs",
+        "warning": "Frontend not built yet. Run 'npm run build' in the frontend folder."
     }
 
 
