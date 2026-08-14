@@ -2,13 +2,12 @@ import jwt
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
-from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.models import AppConfig
+import bcrypt
 
 router = APIRouter(prefix="/api/app-auth")
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 import os
 import secrets
@@ -48,7 +47,7 @@ def setup_password(payload: SetupRequest, db: Session = Depends(get_db)):
     if len(payload.password) < 4:
         raise HTTPException(status_code=400, detail="Password must be at least 4 characters.")
 
-    hashed_pw = pwd_context.hash(payload.password)
+    hashed_pw = bcrypt.hashpw(payload.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     new_config = AppConfig(config_key="admin_password", config_value=hashed_pw)
     db.add(new_config)
     db.commit()
@@ -63,7 +62,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     if not config:
         raise HTTPException(status_code=400, detail="Password not set up yet.")
 
-    if not pwd_context.verify(payload.password, config.config_value):
+    if not bcrypt.checkpw(payload.password.encode('utf-8'), config.config_value.encode('utf-8')):
         raise HTTPException(status_code=401, detail="Invalid password.")
 
     # Generate JWT
