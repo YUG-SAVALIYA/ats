@@ -25,7 +25,7 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
     ...options,
   });
 
-  if (res.status === 401) {
+  if (res.status === 401 || res.status === 403) {
     localStorage.removeItem('ats_admin_token');
     window.location.href = '/lock';
     throw new Error('Unauthorized');

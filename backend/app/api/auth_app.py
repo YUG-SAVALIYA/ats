@@ -76,10 +76,13 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 # Security Dependency
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Validates the JWT token."""
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
     token = credentials.credentials
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
