@@ -56,6 +56,13 @@ class ManualEntryRequest(BaseModel):
     allocated_capital: float = Field(..., gt=0, description="Capital allocated (INR)")
     product_type: str = Field("AUTO", description="MTF (primary) or CNC (fallback)")
 
+class ManualExitRequest(BaseModel):
+    quantity: int = Field(..., gt=0, description="Quantity to sell")
+
+class ManualExitBySecurityRequest(BaseModel):
+    security_id: str = Field(..., description="Dhan security ID")
+    quantity: int = Field(..., gt=0, description="Quantity to sell")
+
 
 @router.get("/auth/status")
 def get_auth_status():
@@ -264,6 +271,76 @@ def cancel_pending_trade_entry(trade_id: str):
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Cancel failed: {exc}")
+
+@router.post("/trades/{trade_id}/exit")
+async def manual_trade_exit(trade_id: str, payload: ManualExitRequest):
+    try:
+        from app.core.executor import place_market_sell
+        db = SessionLocal()
+        trade = db.query(Trade).filter(Trade.id == trade_id).first()
+        if not trade:
+            db.close()
+            raise HTTPException(status_code=404, detail="Trade not found")
+            
+        security_id = trade.security_id
+        db.close()
+        
+        result = await place_market_sell(
+            trade_id=trade_id,
+            security_id=security_id,
+            qty=payload.quantity,
+            purpose="MANUAL_EXIT"
+        )
+        
+        return {"status": "success", "message": "Manual exit order placed successfully", "ats_order_id": result.id, "dhan_order_id": result.dhan_order_id}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Manual exit failed: {exc}")
+
+@router.post("/trades/exit-by-security")
+async def manual_trade_exit_by_security(payload: ManualExitBySecurityRequest):
+    try:
+        from app.core.executor import place_market_sell
+        db = SessionLocal()
+        trade = (
+            db.query(Trade)
+            .filter(
+                Trade.security_id == payload.security_id,
+                Trade.trade_status == "OPEN",
+                Trade.ats_state.in_([AtsTradeState.OPEN, AtsTradeState.PARTIAL_EXIT])
+            )
+            .first()
+        )
+        if not trade:
+            # Fallback to check company_id if security_id isn't directly on Trade model
+            company = db.query(Company).filter(Company.dhan_security_id == payload.security_id).first()
+            if company:
+                trade = db.query(Trade).filter(
+                    Trade.company_id == company.id,
+                    Trade.trade_status == "OPEN",
+                    Trade.ats_state.in_([AtsTradeState.OPEN, AtsTradeState.PARTIAL_EXIT])
+                ).first()
+                
+        if not trade:
+            db.close()
+            raise HTTPException(status_code=404, detail=f"No active ATS trade found for security {payload.security_id}")
+            
+        trade_id = trade.id
+        db.close()
+        
+        result = await place_market_sell(
+            trade_id=trade_id,
+            security_id=payload.security_id,
+            qty=payload.quantity,
+            purpose="MANUAL_EXIT"
+        )
+        
+        return {"status": "success", "message": "Manual exit order placed successfully", "ats_order_id": result.id, "dhan_order_id": result.dhan_order_id}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Manual exit failed: {exc}")
 
 
 @router.get("/portfolio/summary")
@@ -590,3 +667,61 @@ def get_trade_events(trade_id: str = Query(None, description="Filter by trade ID
         ]
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to fetch trade events: {exc}")
+
+
+class StrategySettingsUpdate(BaseModel):
+    daily_rsi_period: int
+    daily_rsi_lower: float
+    daily_rsi_upper: float
+    weekly_rsi_period: int
+    weekly_rsi_lower: float
+    weekly_rsi_upper: float
+    supertrend_period: int
+    supertrend_multiplier: float
+    candle_range_min: float
+    candle_range_max: float
+    market_cap_min_cr: float
+    entry_high_breakout_pct: float
+    initial_sl_pct: float
+    target1_pct: float
+    target2_pct: float
+    sl_stage1_trigger: float
+    sl_stage1_trail: float
+    sl_stage2_trigger: float
+    sl_stage2_trail: float
+    sl_stage3_trigger: float
+    sl_stage3_trail: float
+
+@router.get("/settings/strategy")
+def get_strategy_settings_api():
+    try:
+        from app.services.settings import get_strategy_settings
+        return get_strategy_settings()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to get settings: {exc}")
+
+@router.put("/settings/strategy")
+def update_strategy_settings_api(settings: StrategySettingsUpdate):
+    try:
+        from app.models import StrategySettings
+        db = SessionLocal()
+        
+        db_settings = db.query(StrategySettings).first()
+        if not db_settings:
+            db_settings = StrategySettings()
+            db.add(db_settings)
+            
+        for key, value in settings.dict().items():
+            setattr(db_settings, key, value)
+            
+        db.commit()
+        db.refresh(db_settings)
+        db.close()
+        
+        # Invalidate cache
+        from app.services.settings import settings_manager
+        settings_manager._cached_settings = None
+        
+        return {"status": "success", "message": "Strategy settings updated"}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to update settings: {exc}")

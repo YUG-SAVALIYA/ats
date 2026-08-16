@@ -22,6 +22,7 @@ import { PositionsTable } from './components/PositionsTable';
 import { HoldingsTable } from './components/HoldingsTable';
 import { OrderBookTable } from './components/OrderBookTable';
 import { LockScreen } from './pages/LockScreen';
+import { Settings } from './pages/Settings';
 import { Layers, FileText, History, Database } from 'lucide-react';
 
 function AppContent() {
@@ -332,6 +333,9 @@ function AppContent() {
             )}
           </div>
           } />
+
+          {/* PAGE 4: SETTINGS */}
+          <Route path="/settings" element={<Settings isLight={isLight} />} />
         </Routes>
       </main>
     </div>

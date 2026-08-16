@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { PositionItem } from '../types';
-import { Layers } from 'lucide-react';
+import { Layers, X } from 'lucide-react';
 import { useCompanyImages } from '../context/CompanyImageContext';
+import { api } from '../services/api';
+import { useToast } from '../context/ToastContext';
 
 interface PositionsTableProps {
   positions: PositionItem[];
@@ -15,6 +17,38 @@ function fmt(n?: number) {
 
 export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLight = false }) => {
   const images = useCompanyImages();
+  const { addToast } = useToast();
+  
+  const [exitModalOpen, setExitModalOpen] = useState(false);
+  const [selectedPosition, setSelectedPosition] = useState<PositionItem | null>(null);
+  const [exitQuantity, setExitQuantity] = useState<number>(0);
+  const [isExiting, setIsExiting] = useState(false);
+
+  const openExitModal = (p: PositionItem) => {
+    setSelectedPosition(p);
+    setExitQuantity(p.netQty);
+    setExitModalOpen(true);
+  };
+
+  const closeExitModal = () => {
+    setExitModalOpen(false);
+    setSelectedPosition(null);
+    setExitQuantity(0);
+  };
+
+  const handleExitConfirm = async () => {
+    if (!selectedPosition || exitQuantity <= 0) return;
+    setIsExiting(true);
+    try {
+      await api.manualExitBySecurity(selectedPosition.securityId, exitQuantity);
+      addToast(`Successfully placed MARKET SELL order for ${exitQuantity} shares of ${selectedPosition.tradingSymbol}`, 'success');
+      closeExitModal();
+    } catch (err: any) {
+      addToast(err.message || 'Failed to exit position', 'error');
+    } finally {
+      setIsExiting(false);
+    }
+  };
   
   if (positions.length === 0) {
     return (
@@ -61,7 +95,8 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLig
               <th className="px-3 py-3 text-right">Sell Avg</th>
               <th className="px-3 py-3 text-right">Cost Price</th>
               <th className="px-3 py-3 text-right">Realized PnL</th>
-              <th className="px-4 py-3 text-right">Unrealized MTM</th>
+              <th className="px-3 py-3 text-right">Unrealized MTM</th>
+              <th className="px-4 py-3 text-right">Action</th>
             </tr>
           </thead>
           <tbody className={`divide-y ${isLight ? 'divide-slate-200' : 'divide-zinc-800/60'}`}>
@@ -113,8 +148,21 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLig
                   <td className={`px-3 py-3 text-right font-bold ${rl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                     {rl !== 0 ? `${rl >= 0 ? '+' : '-'}${fmt(rl)}` : '₹0.00'}
                   </td>
-                  <td className={`px-4 py-3 text-right font-bold ${unrl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  <td className={`px-3 py-3 text-right font-bold ${unrl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                     {unrl !== 0 ? `${unrl >= 0 ? '+' : '-'}${fmt(unrl)}` : '₹0.00'}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openExitModal(p); }}
+                      disabled={p.netQty <= 0}
+                      className={`px-3 py-1 rounded text-[10px] font-bold tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                        isLight
+                          ? 'bg-red-100 hover:bg-red-200 text-red-700'
+                          : 'bg-red-500/20 hover:bg-red-500/30 text-red-400'
+                      }`}
+                    >
+                      EXIT
+                    </button>
                   </td>
                 </tr>
               );
@@ -122,6 +170,58 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLig
           </tbody>
         </table>
       </div>
+
+      {/* Exit Modal */}
+      {exitModalOpen && selectedPosition && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className={`relative w-full max-w-sm rounded-2xl p-6 shadow-2xl ${
+            isLight ? 'bg-white border-slate-200 text-slate-900' : 'bg-zinc-900 border-zinc-800 text-white'
+          } border`}>
+            <button
+              onClick={closeExitModal}
+              className={`absolute top-4 right-4 p-1 rounded-full transition-colors ${
+                isLight ? 'hover:bg-slate-100 text-slate-500' : 'hover:bg-zinc-800 text-zinc-400'
+              }`}
+            >
+              <X className="w-5 h-5" />
+            </button>
+            
+            <h3 className="text-lg font-bold mb-1 font-['Outfit']">Exit Position</h3>
+            <p className={`text-xs mb-6 ${isLight ? 'text-slate-500' : 'text-zinc-400'}`}>
+              Selling <strong className={isLight ? 'text-slate-900' : 'text-white'}>{selectedPosition.tradingSymbol}</strong> at Market Price
+            </p>
+            
+            <div className="space-y-4">
+              <div>
+                <label className={`block text-xs font-bold mb-1.5 ${isLight ? 'text-slate-600' : 'text-zinc-400'}`}>Quantity to Sell</label>
+                <input
+                  type="number"
+                  min="1"
+                  max={selectedPosition.netQty}
+                  value={exitQuantity}
+                  onChange={(e) => setExitQuantity(parseInt(e.target.value) || 0)}
+                  className={`w-full px-3 py-2 text-sm font-mono rounded-lg border focus:outline-none focus:ring-1 transition-all ${
+                    isLight 
+                      ? 'bg-slate-50 border-slate-200 text-slate-900 focus:border-red-500 focus:ring-red-500' 
+                      : 'bg-black border-zinc-800 text-white focus:border-red-500 focus:ring-red-500'
+                  }`}
+                />
+                <p className={`text-[10px] mt-1 text-right ${isLight ? 'text-slate-500' : 'text-zinc-500'}`}>
+                  Max available: {selectedPosition.netQty}
+                </p>
+              </div>
+              
+              <button
+                onClick={handleExitConfirm}
+                disabled={isExiting || exitQuantity <= 0 || exitQuantity > selectedPosition.netQty}
+                className="w-full py-2.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:bg-red-600/50 text-white font-bold text-sm transition-all"
+              >
+                {isExiting ? 'Processing...' : `Confirm Exit (${exitQuantity})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

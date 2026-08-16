@@ -429,3 +429,37 @@ class AppConfig(Base):
     config_key = Column(String(128), index=True, nullable=False, unique=True)
     config_value = Column(Text, nullable=True)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class StrategySettings(Base):
+    """Stores dynamic parameters for signal generation and trade management."""
+    __tablename__ = "strategy_settings"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    # Signal Generation Parameters
+    daily_rsi_period = Column(Integer, default=14)
+    daily_rsi_lower = Column(Float, default=50.0)
+    daily_rsi_upper = Column(Float, default=90.0)
+    weekly_rsi_period = Column(Integer, default=14)
+    weekly_rsi_lower = Column(Float, default=65.0)
+    weekly_rsi_upper = Column(Float, default=85.0)
+    supertrend_period = Column(Integer, default=21)
+    supertrend_multiplier = Column(Float, default=1.5)
+    candle_range_min = Column(Float, default=3.0)
+    candle_range_max = Column(Float, default=12.0)
+    market_cap_min_cr = Column(Float, default=8000.0)
+    entry_high_breakout_pct = Column(Float, default=3.0) # 1.03
+    
+    # Trade Management Parameters
+    initial_sl_pct = Column(Float, default=-5.0) # -5%
+    target1_pct = Column(Float, default=12.0) # +12%
+    target2_pct = Column(Float, default=17.0) # +17%
+    
+    sl_stage1_trigger = Column(Float, default=5.0) # +5%
+    sl_stage1_trail = Column(Float, default=2.0)   # +2%
+    sl_stage2_trigger = Column(Float, default=8.0) # +8%
+    sl_stage2_trail = Column(Float, default=4.0)   # +4%
+    sl_stage3_trigger = Column(Float, default=12.0)# +12%
+    sl_stage3_trail = Column(Float, default=5.0)   # +5%
+    
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)

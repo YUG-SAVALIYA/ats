@@ -2,6 +2,7 @@ import React from 'react';
 import { AuthStatus } from '../types';
 import { ShieldCheck, RefreshCw, Zap, LayoutDashboard, Activity, TrendingUp, Sun, Moon } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
+import { Settings as SettingsIcon } from 'lucide-react';
 
 interface HeaderProps {
   authStatus: AuthStatus | null;
@@ -104,6 +105,22 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <TrendingUp className="h-4 w-4" />
             <span>Trades ({openTradesCount})</span>
+          </Link>
+
+          <Link
+            to="/settings"
+            className={`flex items-center gap-2 px-5 py-2 text-xs font-bold rounded-full transition-all duration-200 ${
+              currentPath === '/settings'
+                ? isLight
+                  ? 'bg-slate-200 text-slate-900 border-transparent shadow-sm font-bold'
+                  : 'bg-zinc-800 text-white shadow-md'
+                : isLight
+                ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'
+            }`}
+          >
+            <SettingsIcon className="h-4 w-4" />
+            <span>Settings</span>
           </Link>
         </nav>
 

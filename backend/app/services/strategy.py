@@ -199,8 +199,11 @@ def evaluate_stock_signal(
     """
     Evaluates signal generation rules after market close using completed candles only.
     """
-    # Rule 1: Market cap > ₹8,000 Cr
-    if market_cap_cr <= 8000.0:
+    from app.services.settings import get_strategy_settings
+    settings = get_strategy_settings()
+    
+    # Rule 1: Market cap > dynamic min
+    if market_cap_cr <= settings["market_cap_min_cr"]:
         return None
 
     if len(daily_candles) < 22:
@@ -211,24 +214,24 @@ def evaluate_stock_signal(
     if len(completed_weekly) < 15:
         return None
 
-    # Daily RSI(14)
+    # Daily RSI(dynamic period)
     daily_closes = [float(c["close"]) for c in daily_candles]
-    daily_rsi = calculate_rsi(daily_closes, period=14)
+    daily_rsi = calculate_rsi(daily_closes, period=settings["daily_rsi_period"])
 
-    # Weekly RSI(14) using previous completed weekly candles
+    # Weekly RSI(dynamic period) using previous completed weekly candles
     weekly_closes = [float(c["close"]) for c in completed_weekly]
-    weekly_rsi = calculate_rsi(weekly_closes, period=14)
+    weekly_rsi = calculate_rsi(weekly_closes, period=settings["weekly_rsi_period"])
 
-    # Rule 2: Daily RSI between 50 and 90 (inclusive)
-    if not (50.0 <= daily_rsi <= 90.0):
+    # Rule 2: Daily RSI between bounds
+    if not (settings["daily_rsi_lower"] <= daily_rsi <= settings["daily_rsi_upper"]):
         return None
 
-    # Rule 3: Weekly RSI between 65 and 85 (inclusive)
-    if not (65.0 <= weekly_rsi <= 85.0):
+    # Rule 3: Weekly RSI between bounds
+    if not (settings["weekly_rsi_lower"] <= weekly_rsi <= settings["weekly_rsi_upper"]):
         return None
 
-    # Rule 4: Daily Supertrend (21, 1.5) flips from RED (-1) to GREEN (+1) on latest daily candle
-    st_directions = calculate_supertrend(daily_candles, period=21, multiplier=1.5)
+    # Rule 4: Daily Supertrend (dynamic params) flips from RED (-1) to GREEN (+1) on latest daily candle
+    st_directions = calculate_supertrend(daily_candles, period=settings["supertrend_period"], multiplier=settings["supertrend_multiplier"])
     if len(st_directions) < 2:
         return None
 
@@ -238,7 +241,7 @@ def evaluate_stock_signal(
     if not (prev_st == -1 and curr_st == 1):
         return None
 
-    # Rule 5: Signal candle range between 3% and 12% (inclusive)
+    # Rule 5: Signal candle range between dynamic bounds
     signal_candle = daily_candles[-1]
     high = float(signal_candle["high"])
     low = float(signal_candle["low"])
@@ -249,7 +252,7 @@ def evaluate_stock_signal(
         return None
 
     candle_range = round(((high - low) / low) * 100.0, 2)
-    if not (3.0 <= candle_range <= 12.0):
+    if not (settings["candle_range_min"] <= candle_range <= settings["candle_range_max"]):
         return None
 
     sig_date_val = signal_candle.get("date", date.today())
@@ -419,6 +422,9 @@ class AutomatedStrategyEngine:
         global _engine_enabled
         if not _engine_enabled:
             return {"status": "paused", "reason": "Engine disabled"}
+            
+        from app.services.settings import get_strategy_settings
+        settings = get_strategy_settings()
 
         today = date.today()
         db = SessionLocal()
@@ -507,15 +513,16 @@ class AutomatedStrategyEngine:
                     continue
 
                 # ── Entry Conditions Check (3:25 PM IST) ─────────────────────
-                # 1. Today High >= Reference * 1.03
+                # 1. Today High >= Reference * dynamic %
                 # 2. LTP > Signal High
-                cond_high_breakout = (today_high >= (ref_price * 1.03))
+                breakout_multiplier = 1.0 + (settings["entry_high_breakout_pct"] / 100.0)
+                cond_high_breakout = (today_high >= (ref_price * breakout_multiplier))
                 cond_ltp_above_high = (ltp > signal_high)
 
                 if cond_high_breakout and cond_ltp_above_high:
                     logger.info(
                         f"[ENGINE][3:25 PM] 🟢 ENTRY TRIGGERED for {comp.trading_symbol}! "
-                        f"High ({today_high}) >= Ref+3% ({ref_price * 1.03}) AND LTP ({ltp}) > Signal High ({signal_high})"
+                        f"High ({today_high}) >= Ref+{settings['entry_high_breakout_pct']}% ({ref_price * breakout_multiplier}) AND LTP ({ltp}) > Signal High ({signal_high})"
                     )
 
                     try:
@@ -557,7 +564,7 @@ class AutomatedStrategyEngine:
                     rejected_count += 1
                     logger.info(
                         f"[ENGINE][3:25 PM] Signal REJECTED for {comp.trading_symbol}: "
-                        f"HighBreakout={cond_high_breakout} (High={today_high} vs Ref+3%={ref_price * 1.03}), "
+                        f"HighBreakout={cond_high_breakout} (High={today_high} vs Ref+{settings['entry_high_breakout_pct']}%={ref_price * breakout_multiplier}), "
                         f"LTPBreakout={cond_ltp_above_high} (LTP={ltp} vs High={signal_high})"
                     )
 
@@ -572,7 +579,7 @@ class AutomatedStrategyEngine:
 
     def evaluate_and_execute_325_exits(self) -> Dict[str, Any]:
         """
-        Evaluates OPEN and PARTIAL_EXIT trades at 3:25 PM IST against Daily Supertrend(21, 1.5).
+        Evaluates OPEN and PARTIAL_EXIT trades at 3:25 PM IST against Daily Supertrend(dynamic).
         If Supertrend turns RED (-1), places MARKET SELL for remaining quantity immediately.
         """
         global _engine_enabled
@@ -581,6 +588,9 @@ class AutomatedStrategyEngine:
 
         from app.core.engine import get_trade_engine
         trade_engine = get_trade_engine()
+        
+        from app.services.settings import get_strategy_settings
+        settings = get_strategy_settings()
 
         db = SessionLocal()
         try:
@@ -648,7 +658,7 @@ class AutomatedStrategyEngine:
                         }
                         combined_candles = daily_candles + [live_candle]
 
-                    st_dirs = calculate_supertrend(combined_candles, period=21, multiplier=1.5)
+                    st_dirs = calculate_supertrend(combined_candles, period=settings["supertrend_period"], multiplier=settings["supertrend_multiplier"])
                     if not st_dirs:
                         continue
 
@@ -656,7 +666,7 @@ class AutomatedStrategyEngine:
 
                     logger.info(
                         f"[ENGINE][3:25 PM] {company.trading_symbol} (sec_id={sec_id_int}): "
-                        f"Close={live_close}, Supertrend(21, 1.5)={'GREEN (+1)' if latest_st == 1 else 'RED (-1)'}"
+                        f"Close={live_close}, Supertrend({settings['supertrend_period']}, {settings['supertrend_multiplier']})={'GREEN (+1)' if latest_st == 1 else 'RED (-1)'}"
                     )
 
                     if latest_st == -1:

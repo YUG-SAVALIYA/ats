@@ -15,6 +15,7 @@ Final target (+17%): full exit of remaining qty.
 """
 
 from __future__ import annotations
+from app.services.settings import get_strategy_settings
 
 
 def _r2(v: float) -> float:
@@ -22,42 +23,48 @@ def _r2(v: float) -> float:
 
 
 def compute_initial_levels(entry: float) -> dict:
-    """Compute all price levels from actual fill price."""
+    """Compute all price levels from actual fill price using dynamic settings."""
+    settings = get_strategy_settings()
     return {
-        "stop_price":         _r2(entry * 0.95),    # initial SL  −5%
-        "target1_price":      _r2(entry * 1.12),    # +12% → partial exit + SL→+5%
-        "target2_price":      _r2(entry * 1.17),    # +17% → final exit
-        "sl_stage_1_trigger": _r2(entry * 1.05),    # at +5%  → SL→+2%
-        "sl_stage_2_trigger": _r2(entry * 1.08),    # at +8%  → SL→+4%
-        "sl_stage_3_trigger": _r2(entry * 1.12),    # at +12% → SL→+5% + partial exit
+        "stop_price":         _r2(entry * (1 + settings["initial_sl_pct"] / 100.0)),
+        "target1_price":      _r2(entry * (1 + settings["target1_pct"] / 100.0)),
+        "target2_price":      _r2(entry * (1 + settings["target2_pct"] / 100.0)),
+        "sl_stage_1_trigger": _r2(entry * (1 + settings["sl_stage1_trigger"] / 100.0)),
+        "sl_stage_2_trigger": _r2(entry * (1 + settings["sl_stage2_trigger"] / 100.0)),
+        "sl_stage_3_trigger": _r2(entry * (1 + settings["sl_stage3_trigger"] / 100.0)),
     }
 
 
 def sl_price_for_stage(entry: float, stage: int) -> float:
     """Return the SL price corresponding to a given stage."""
+    settings = get_strategy_settings()
     mapping = {
-        0: _r2(entry * 0.95),
-        1: _r2(entry * 1.02),
-        2: _r2(entry * 1.04),
-        3: _r2(entry * 1.05),
+        0: _r2(entry * (1 + settings["initial_sl_pct"] / 100.0)),
+        1: _r2(entry * (1 + settings["sl_stage1_trail"] / 100.0)),
+        2: _r2(entry * (1 + settings["sl_stage2_trail"] / 100.0)),
+        3: _r2(entry * (1 + settings["sl_stage3_trail"] / 100.0)),
     }
-    return mapping.get(stage, _r2(entry * 0.95))
+    return mapping.get(stage, mapping[0])
 
 
 def stage_1_trigger(entry: float) -> float:
-    return _r2(entry * 1.05)   # +5%
+    settings = get_strategy_settings()
+    return _r2(entry * (1 + settings["sl_stage1_trigger"] / 100.0))
 
 
 def stage_2_trigger(entry: float) -> float:
-    return _r2(entry * 1.08)   # +8%
+    settings = get_strategy_settings()
+    return _r2(entry * (1 + settings["sl_stage2_trigger"] / 100.0))
 
 
 def stage_3_trigger(entry: float) -> float:
-    return _r2(entry * 1.12)   # +12%
+    settings = get_strategy_settings()
+    return _r2(entry * (1 + settings["sl_stage3_trigger"] / 100.0))
 
 
 def final_target(entry: float) -> float:
-    return _r2(entry * 1.17)   # +17%
+    settings = get_strategy_settings()
+    return _r2(entry * (1 + settings["target2_pct"] / 100.0))
 
 
 def next_sl_stage(current_stage: int, ltp: float, entry: float) -> int:

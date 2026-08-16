@@ -98,6 +98,30 @@ export interface StrategySignal {
   created_at?: string | number;
 }
 
+export interface StrategySettings {
+  daily_rsi_period: number;
+  daily_rsi_lower: number;
+  daily_rsi_upper: number;
+  weekly_rsi_period: number;
+  weekly_rsi_lower: number;
+  weekly_rsi_upper: number;
+  supertrend_period: number;
+  supertrend_multiplier: number;
+  candle_range_min: number;
+  candle_range_max: number;
+  market_cap_min_cr: number;
+  entry_high_breakout_pct: number;
+  initial_sl_pct: number;
+  target1_pct: number;
+  target2_pct: number;
+  sl_stage1_trigger: number;
+  sl_stage1_trail: number;
+  sl_stage2_trigger: number;
+  sl_stage2_trail: number;
+  sl_stage3_trigger: number;
+  sl_stage3_trail: number;
+}
+
 export const api = {
   // Automated Engine
   getEngineStatus: () => fetchJson<EngineStatus>('/engine/status'),
@@ -133,4 +157,21 @@ export const api = {
   // Stock Master
   searchStocks: (query: string) => fetchJson<StockMasterItem[]>(`/stocks/search?q=${encodeURIComponent(query)}`),
   getStockBySymbol: (symbol: string) => fetchJson<StockMasterItem>(`/stocks/${encodeURIComponent(symbol)}`),
+
+  // Strategy Settings
+  getStrategySettings: () => fetchJson<StrategySettings>('/settings/strategy'),
+  updateStrategySettings: (settings: StrategySettings) => fetchJson<{ status: string; message: string }>('/settings/strategy', {
+    method: 'PUT',
+    body: JSON.stringify(settings),
+  }),
+
+  // Manual Controls
+  manualTradeExit: (tradeId: string, quantity: number) => fetchJson<{ status: string; message: string; ats_order_id: string }>(`/trades/${tradeId}/exit`, {
+    method: 'POST',
+    body: JSON.stringify({ quantity }),
+  }),
+  manualExitBySecurity: (securityId: string, quantity: number) => fetchJson<{ status: string; message: string; ats_order_id: string }>('/trades/exit-by-security', {
+    method: 'POST',
+    body: JSON.stringify({ security_id: securityId, quantity }),
+  }),
 };
