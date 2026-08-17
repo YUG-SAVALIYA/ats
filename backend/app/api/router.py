@@ -176,9 +176,9 @@ async def trigger_broker_reconciliation_api():
 
 
 @router.get("/signals")
-def list_signals(status: str = Query(None)):
+def list_signals(status: str = Query(None), strategy_type: str = Query(None)):
     try:
-        return get_signals_from_db(status=status, limit=200)
+        return get_signals_from_db(status=status, strategy_type=strategy_type, limit=200)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to list signals: {exc}")
 
@@ -344,13 +344,22 @@ async def manual_trade_exit_by_security(payload: ManualExitBySecurityRequest):
 
 
 @router.get("/portfolio/summary")
-def get_portfolio_summary():
+def get_portfolio_summary(strategy_type: str = Query(None)):
     try:
         summary = portfolio_service.get_full_broker_summary()
 
+        # The summary currently contains all Dhan data. We don't filter Dhan data by strategy, 
+        # but we can filter the DB lists.
         db = SessionLocal()
-        db_trades_raw = db.query(Trade).order_by(Trade.created_at.desc()).limit(200).all()
-        db_orders_raw = db.query(AtsOrder).order_by(AtsOrder.created_at.desc()).limit(200).all()
+        
+        q_trades = db.query(Trade)
+        q_orders = db.query(AtsOrder)
+        if strategy_type:
+            q_trades = q_trades.filter(Trade.strategy_type == strategy_type)
+            q_orders = q_orders.filter(AtsOrder.strategy_type == strategy_type)
+            
+        db_trades_raw = q_trades.order_by(Trade.created_at.desc()).limit(200).all()
+        db_orders_raw = q_orders.order_by(AtsOrder.created_at.desc()).limit(200).all()
         db.close()
 
         summary["db_trades"] = [
@@ -524,10 +533,13 @@ def trigger_candle_sync_single(symbol: str):
 
 
 @router.get("/db/trades")
-def get_db_trades():
+def get_db_trades(strategy_type: str = Query(None)):
     try:
         db = SessionLocal()
-        records = db.query(Trade).order_by(Trade.created_at.desc()).limit(200).all()
+        q = db.query(Trade)
+        if strategy_type:
+            q = q.filter(Trade.strategy_type == strategy_type)
+        records = q.order_by(Trade.created_at.desc()).limit(200).all()
         db.close()
         return [
             {
@@ -550,10 +562,13 @@ def get_db_trades():
         raise HTTPException(status_code=500, detail=f"Failed to fetch trades: {exc}")
 
 @router.get("/db/orders")
-def get_db_orders():
+def get_db_orders(strategy_type: str = Query(None)):
     try:
         db = SessionLocal()
-        ats_orders = db.query(AtsOrder).order_by(AtsOrder.created_at.desc()).limit(200).all()
+        q_ats = db.query(AtsOrder)
+        if strategy_type:
+            q_ats = q_ats.filter(AtsOrder.strategy_type == strategy_type)
+        ats_orders = q_ats.order_by(AtsOrder.created_at.desc()).limit(200).all()
         legacy_orders = db.query(TradeOrder).order_by(TradeOrder.created_at.desc()).limit(50).all()
         db.close()
 
@@ -692,6 +707,30 @@ class StrategySettingsUpdate(BaseModel):
     sl_stage3_trigger: float
     sl_stage3_trail: float
 
+
+class MonthlyRsiSettingsUpdate(BaseModel):
+    rsi_period: int
+    min_rsi: float
+    max_rsi: float
+    swing_window: int
+    swing_buffer_pct: float
+    min_roc6_pct: float
+    min_close_above_sma12_pct: float
+    max_entry_gap_pct: float
+    
+    rsi_exit_below: float
+    rsi_exit_trail_points: float
+    min_stop_distance_pct: float
+    max_stop_distance_pct: float
+    supertrend_period: int
+    supertrend_multiplier: float
+    supertrend_exit_enabled: bool
+    
+    target_pct: float
+    partial_exit_qty_pct: float
+    partial_exit_profit_pct: float
+    partial_stop_profit_pct: float
+
 @router.get("/settings/strategy")
 def get_strategy_settings_api():
     try:
@@ -723,5 +762,45 @@ def update_strategy_settings_api(settings: StrategySettingsUpdate):
         settings_manager._cached_settings = None
         
         return {"status": "success", "message": "Strategy settings updated"}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to update settings: {exc}")
+
+@router.get("/settings/monthly_rsi")
+def get_monthly_rsi_settings_api():
+    try:
+        from app.models import MonthlyRsiSettings
+        db = SessionLocal()
+        settings = db.query(MonthlyRsiSettings).first()
+        if not settings:
+            settings = MonthlyRsiSettings()
+            db.add(settings)
+            db.commit()
+            db.refresh(settings)
+        db.close()
+        
+        # Convert to dict
+        return {c.name: getattr(settings, c.name) for c in settings.__table__.columns if c.name not in ('id', 'updated_at')}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to get settings: {exc}")
+
+@router.put("/settings/monthly_rsi")
+def update_monthly_rsi_settings_api(settings: MonthlyRsiSettingsUpdate):
+    try:
+        from app.models import MonthlyRsiSettings
+        db = SessionLocal()
+        
+        db_settings = db.query(MonthlyRsiSettings).first()
+        if not db_settings:
+            db_settings = MonthlyRsiSettings()
+            db.add(db_settings)
+            
+        for key, value in settings.dict().items():
+            setattr(db_settings, key, value)
+            
+        db.commit()
+        db.refresh(db_settings)
+        db.close()
+        
+        return {"status": "success", "message": "Monthly RSI settings updated"}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to update settings: {exc}")

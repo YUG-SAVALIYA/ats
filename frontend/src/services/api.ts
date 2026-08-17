@@ -122,6 +122,30 @@ export interface StrategySettings {
   sl_stage3_trail: number;
 }
 
+export interface MonthlyRsiSettings {
+  rsi_period: number;
+  min_rsi: number;
+  max_rsi: number;
+  swing_window: number;
+  swing_buffer_pct: number;
+  min_roc6_pct: number;
+  min_close_above_sma12_pct: number;
+  max_entry_gap_pct: number;
+  
+  rsi_exit_below: number;
+  rsi_exit_trail_points: number;
+  min_stop_distance_pct: number;
+  max_stop_distance_pct: number;
+  supertrend_period: number;
+  supertrend_multiplier: number;
+  supertrend_exit_enabled: boolean;
+  
+  target_pct: number;
+  partial_exit_qty_pct: number;
+  partial_exit_profit_pct: number;
+  partial_stop_profit_pct: number;
+}
+
 export const api = {
   // Automated Engine
   getEngineStatus: () => fetchJson<EngineStatus>('/engine/status'),
@@ -130,7 +154,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ enabled }),
     }),
-  getSignals: () => fetchJson<StrategySignal[]>('/signals'),
+  getSignals: (strategy?: string) => fetchJson<StrategySignal[]>(`/signals${strategy ? `?strategy_type=${strategy}` : ''}`),
 
   // Auth
   getAuthStatus: () => fetchJson<AuthStatus>('/auth/status'),
@@ -141,7 +165,7 @@ export const api = {
     }),
 
   // Portfolio & Account Sync
-  getPortfolioSummary: () => fetchJson<PortfolioSummary>('/portfolio/summary'),
+  getPortfolioSummary: (strategy?: string) => fetchJson<PortfolioSummary>(`/portfolio/summary${strategy ? `?strategy_type=${strategy}` : ''}`),
   getFunds: () => fetchJson<FundLimits>('/portfolio/funds'),
   getHoldings: () => fetchJson<HoldingItem[]>('/portfolio/holdings'),
   getPositions: () => fetchJson<PositionItem[]>('/portfolio/positions'),
@@ -159,11 +183,24 @@ export const api = {
   getStockBySymbol: (symbol: string) => fetchJson<StockMasterItem>(`/stocks/${encodeURIComponent(symbol)}`),
 
   // Strategy Settings
-  getStrategySettings: () => fetchJson<StrategySettings>('/settings/strategy'),
-  updateStrategySettings: (settings: StrategySettings) => fetchJson<{ status: string; message: string }>('/settings/strategy', {
-    method: 'PUT',
-    body: JSON.stringify(settings),
-  }),
+  getStrategySettings: (strategy?: string) => {
+    if (strategy === 'MONTHLY_RSI') {
+      return fetchJson<any>('/settings/monthly_rsi');
+    }
+    return fetchJson<any>('/settings/strategy');
+  },
+  updateStrategySettings: (settings: any, strategy?: string) => {
+    if (strategy === 'MONTHLY_RSI') {
+      return fetchJson<{ status: string; message: string }>('/settings/monthly_rsi', {
+        method: 'PUT',
+        body: JSON.stringify(settings),
+      });
+    }
+    return fetchJson<{ status: string; message: string }>('/settings/strategy', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    });
+  },
 
   // Manual Controls
   manualTradeExit: (tradeId: string, quantity: number) => fetchJson<{ status: string; message: string; ats_order_id: string }>(`/trades/${tradeId}/exit`, {

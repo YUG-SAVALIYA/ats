@@ -315,7 +315,7 @@ async def place_market_sell(
             db_resp.expunge(ord_item)
             return ord_item
 
-        ret_ord = AtsOrder(id=order_rec_id, trade_id=trade_id, dhan_order_id=dhan_order_id, correlation_id=correlation_id, order_purpose=purpose_str, transaction_type="SELL", security_id=str(security_id), quantity=int(qty), order_type="MARKET", product_type=product_type, exchange_segment="NSE_EQ", status="TRANSIT")
+        ret_ord = AtsOrder(id=order_rec_id, trade_id=trade_id, strategy_type=trade.strategy_type, dhan_order_id=dhan_order_id, correlation_id=correlation_id, order_purpose=purpose_str, transaction_type="SELL", security_id=str(security_id), quantity=int(qty), order_type="MARKET", product_type=product_type, exchange_segment="NSE_EQ", status="TRANSIT")
         return ret_ord
 
     finally:
@@ -449,6 +449,7 @@ class OrderExecutor:
         allocated_capital: float,
         exchange_segment: str = "NSE_EQ",
         product_type: Optional[str] = None,
+        strategy_type: str = "SUPERTREND",
     ) -> dict:
         """Place a MARKET BUY entry order on Dhan (POST /v2/orders)."""
         from datetime import date
@@ -472,6 +473,7 @@ class OrderExecutor:
                 company_id=company_id,
                 signal_id=signal_id,
                 security_id=str(security_id),
+                strategy_type=strategy_type,
                 trade_date=date.today(),
                 allocated_capital=_r2(allocated_capital),
                 allocated_quantity=quantity,
@@ -497,6 +499,7 @@ class OrderExecutor:
             order_rec = AtsOrder(
                 id=str(uuid.uuid4()),
                 trade_id=trade_id,
+                strategy_type=strategy_type,
                 dhan_order_id=None,
                 correlation_id=correlation_id,
                 order_purpose=OrderPurpose.ENTRY,

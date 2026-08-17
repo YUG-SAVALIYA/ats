@@ -3,6 +3,7 @@ import { AuthStatus } from '../types';
 import { ShieldCheck, RefreshCw, Zap, LayoutDashboard, Activity, TrendingUp, Sun, Moon } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { Settings as SettingsIcon } from 'lucide-react';
+import { useStrategy } from '../context/StrategyContext';
 
 interface HeaderProps {
   authStatus: AuthStatus | null;
@@ -26,6 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
   const isLight = theme === 'light';
   const location = useLocation();
   const currentPath = location.pathname;
+  const { activeStrategy, setActiveStrategy } = useStrategy();
 
   return (
     <header className={`sticky top-0 z-40 border-b transition-colors duration-300 ${
@@ -55,6 +57,30 @@ export const Header: React.FC<HeaderProps> = ({
               Direct connection to Dhan HQ API v2 • Zero paper mode
             </p>
           </div>
+        </div>
+
+        {/* Strategy Switcher */}
+        <div className={`flex items-center gap-1 p-1 rounded-xl border ${isLight ? 'bg-slate-100 border-slate-200' : 'bg-zinc-900 border-zinc-800'}`}>
+          <button
+            onClick={() => setActiveStrategy('SUPERTREND')}
+            className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${
+              activeStrategy === 'SUPERTREND' 
+                ? 'bg-blue-600 text-white shadow-sm' 
+                : isLight ? 'text-slate-600 hover:bg-slate-200' : 'text-zinc-400 hover:bg-zinc-800'
+            }`}
+          >
+            Supertrend Breakout
+          </button>
+          <button
+            onClick={() => setActiveStrategy('MONTHLY_RSI')}
+            className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${
+              activeStrategy === 'MONTHLY_RSI' 
+                ? 'bg-purple-600 text-white shadow-sm' 
+                : isLight ? 'text-slate-600 hover:bg-slate-200' : 'text-zinc-400 hover:bg-zinc-800'
+            }`}
+          >
+            Monthly RSI
+          </button>
         </div>
 
         {/* Navigation Tabs (Dashboard, Signals, Trades) - Sleek Pill Tabs */}

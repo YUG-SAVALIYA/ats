@@ -13,8 +13,10 @@ import {
   DbModificationItem,
 } from './types';
 import { api, EngineStatus, StrategySignal } from './services/api';
+
 import { ToastProvider, useToast } from './context/ToastContext';
 import { CompanyImageProvider } from './context/CompanyImageContext';
+import { StrategyProvider, useStrategy } from './context/StrategyContext';
 import { Header } from './components/Header';
 import { MetricCards } from './components/MetricCards';
 import { SignalsTable } from './components/SignalsTable';
@@ -38,6 +40,8 @@ function AppContent() {
   const [dbTrades, setDbTrades] = useState<DbTradeItem[]>([]);
   const [dbOrders, setDbOrders] = useState<DbOrderItem[]>([]);
   const [dbModifications, setDbModifications] = useState<DbModificationItem[]>([]);
+  
+  const { activeStrategy } = useStrategy();
 
   // Dark / Light Mode state
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -69,8 +73,8 @@ function AppContent() {
       const [authRes, engineRes, signalsRes, summaryRes] = await Promise.all([
         api.getAuthStatus(),
         api.getEngineStatus(),
-        api.getSignals(),
-        api.getPortfolioSummary(),
+        api.getSignals(activeStrategy),
+        api.getPortfolioSummary(activeStrategy),
       ]);
 
       setAuthStatus(authRes);
@@ -96,7 +100,7 @@ function AppContent() {
       setIsSyncing(false);
       isFetchingRef.current = false;
     }
-  }, [addToast]);
+  }, [addToast, activeStrategy]);
 
   useEffect(() => {
     // Initial fetch on page mount / browser refresh
@@ -342,17 +346,18 @@ function AppContent() {
   );
 }
 
-export function App() {
+
+export default function App() {
   return (
-    <CompanyImageProvider>
-      <ToastProvider>
-        <Routes>
-          <Route path="/lock" element={<LockScreen />} />
-          <Route path="/*" element={<AppContent />} />
-        </Routes>
-      </ToastProvider>
-    </CompanyImageProvider>
+    <StrategyProvider>
+      <CompanyImageProvider>
+        <ToastProvider>
+          <Routes>
+            <Route path="/lock" element={<LockScreen />} />
+            <Route path="/*" element={<AppContent />} />
+          </Routes>
+        </ToastProvider>
+      </CompanyImageProvider>
+    </StrategyProvider>
   );
 }
-
-export default App;

@@ -95,6 +95,7 @@ class Signal(Base):
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
     company_id = Column(String(36), ForeignKey("companies.id"), nullable=False, index=True)
+    strategy_type = Column(String(32), default="SUPERTREND", index=True)
     date = Column(Date, nullable=False, index=True)
     raw_signal_data = Column(JSON, nullable=True)
     status = Column(String(32), default="PENDING", index=True)
@@ -113,6 +114,7 @@ class Trade(Base):
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
     company_id = Column(String(36), ForeignKey("companies.id"), nullable=False, index=True)
+    strategy_type = Column(String(32), default="SUPERTREND", index=True)
     signal_id = Column(String(36), ForeignKey("signals.id"), nullable=True, index=True)
     trade_date = Column(Date, nullable=False)
     allocated_capital = Column(Float, nullable=True)
@@ -321,6 +323,27 @@ class WeeklyCandle(Base):
     company = relationship("Company", backref="weekly_candles")
 
 
+class MonthlyCandle(Base):
+    __tablename__ = "monthly_candles"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    company_id = Column(String(36), ForeignKey("companies.id"), nullable=False, index=True)
+    month_start_date = Column(Date, nullable=False, index=True)
+    month_end_date = Column(Date, nullable=False)
+    open = Column(Float, nullable=False)
+    high = Column(Float, nullable=False)
+    low = Column(Float, nullable=False)
+    close = Column(Float, nullable=False)
+    volume = Column(BigInteger, default=0)
+    trading_days = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint('company_id', 'month_start_date', name='uq_monthly_candle_company_month'),)
+
+    company = relationship("Company", backref="monthly_candles")
+
+
 class MarketHoliday(Base):
     __tablename__ = "market_holidays"
 
@@ -349,6 +372,7 @@ class AtsOrder(Base):
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
     trade_id = Column(String(36), ForeignKey("trades.id"), nullable=False, index=True)
+    strategy_type = Column(String(32), default="SUPERTREND", index=True)
     dhan_order_id = Column(String(64), index=True, nullable=True)   # returned by Dhan on placement
     correlation_id = Column(String(64), index=True, nullable=True)  # sent as correlationId to Dhan
 
@@ -461,5 +485,38 @@ class StrategySettings(Base):
     sl_stage2_trail = Column(Float, default=4.0)   # +4%
     sl_stage3_trigger = Column(Float, default=12.0)# +12%
     sl_stage3_trail = Column(Float, default=5.0)   # +5%
+    
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class MonthlyRsiSettings(Base):
+    """Stores dynamic parameters for Monthly RSI strategy."""
+    __tablename__ = "monthly_rsi_settings"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    # Signal Generation Parameters
+    rsi_period = Column(Integer, default=14)
+    min_rsi = Column(Float, default=55.0)
+    max_rsi = Column(Float, default=70.0)
+    swing_window = Column(Integer, default=10)
+    swing_buffer_pct = Column(Float, default=0.5)
+    min_roc6_pct = Column(Float, default=25.0)
+    min_close_above_sma12_pct = Column(Float, default=10.0)
+    max_entry_gap_pct = Column(Float, default=5.0)
+    
+    # Exit / Risk Parameters
+    rsi_exit_below = Column(Float, default=55.0)
+    rsi_exit_trail_points = Column(Float, default=5.0)
+    min_stop_distance_pct = Column(Float, default=10.0)
+    max_stop_distance_pct = Column(Float, default=25.0)
+    supertrend_period = Column(Integer, default=10)
+    supertrend_multiplier = Column(Float, default=3.0)
+    supertrend_exit_enabled = Column(Boolean, default=True)
+    
+    # Trade Management Parameters
+    target_pct = Column(Float, default=100.0)
+    partial_exit_qty_pct = Column(Float, default=0.0)
+    partial_exit_profit_pct = Column(Float, default=10.0)
+    partial_stop_profit_pct = Column(Float, default=0.0)
     
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)

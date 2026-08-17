@@ -299,7 +299,7 @@ def calculate_reference_price(signal_high: float, today_open: float) -> tuple[fl
     return signal_high, False
 
 
-def _save_signal_to_db(company_id: str, signal_dict: Dict[str, Any]) -> Signal:
+def _save_signal_to_db(company_id: str, signal_dict: Dict[str, Any], strategy_type: str = "SUPERTREND") -> Signal:
     """Saves detected signal to PostgreSQL `signals` table."""
     db = SessionLocal()
     try:
@@ -308,23 +308,33 @@ def _save_signal_to_db(company_id: str, signal_dict: Dict[str, Any]) -> Signal:
         existing = db.query(Signal).filter(
             Signal.company_id == company_id,
             Signal.date == sig_date,
-            Signal.status == "PENDING"
+            Signal.status == "PENDING",
+            Signal.strategy_type == strategy_type
         ).first()
 
         if existing:
             return existing
 
-        raw_data = {
-            "signal_high": signal_dict["signal_high"],
-            "signal_low": signal_dict["signal_low"],
-            "signal_open": signal_dict["signal_open"],
-            "signal_close": signal_dict["signal_close"],
-            "daily_rsi": signal_dict["daily_rsi"],
-            "weekly_rsi": signal_dict["weekly_rsi"],
-            "candle_range": signal_dict["candle_range"],
-            "supertrend_flip": signal_dict["supertrend_flip"],
-            "market_cap_cr": signal_dict["market_cap_cr"],
-        }
+        if strategy_type == "SUPERTREND":
+            raw_data = {
+                "signal_high": signal_dict["signal_high"],
+                "signal_low": signal_dict["signal_low"],
+                "signal_open": signal_dict["signal_open"],
+                "signal_close": signal_dict["signal_close"],
+                "daily_rsi": signal_dict["daily_rsi"],
+                "weekly_rsi": signal_dict["weekly_rsi"],
+                "candle_range": signal_dict["candle_range"],
+                "supertrend_flip": signal_dict["supertrend_flip"],
+                "market_cap_cr": signal_dict["market_cap_cr"],
+            }
+        else:
+            raw_data = signal_dict.get("raw_signal_data", {})
+            raw_data.update({
+                "signal_high": signal_dict["signal_high"],
+                "signal_low": signal_dict["signal_low"],
+                "signal_open": signal_dict["signal_open"],
+                "signal_close": signal_dict["signal_close"],
+            })
 
         signal_obj = Signal(
             id=str(uuid.uuid4()),
@@ -332,6 +342,7 @@ def _save_signal_to_db(company_id: str, signal_dict: Dict[str, Any]) -> Signal:
             date=sig_date,
             raw_signal_data=raw_data,
             status="PENDING",
+            strategy_type=strategy_type,
             created_at=datetime.utcnow()
         )
         db.add(signal_obj)
@@ -346,13 +357,15 @@ def _save_signal_to_db(company_id: str, signal_dict: Dict[str, Any]) -> Signal:
         db.close()
 
 
-def get_signals_from_db(status: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
+def get_signals_from_db(status: Optional[str] = None, strategy_type: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
     """Fetches signals from DB joined with companies."""
     db = SessionLocal()
     try:
         query = db.query(Signal, Company).join(Company, Signal.company_id == Company.id)
         if status:
             query = query.filter(Signal.status == status)
+        if strategy_type:
+            query = query.filter(Signal.strategy_type == strategy_type)
 
         results = query.order_by(Signal.date.desc(), Signal.created_at.desc()).limit(limit).all()
 
@@ -482,48 +495,82 @@ class AutomatedStrategyEngine:
                 today_low = float(feed_item.get("low") or 0.0)
                 ltp = float(feed_item.get("last_price") or feed_item.get("close") or 0.0)
 
-                raw = sig.raw_signal_data or {}
-                signal_high = float(raw.get("signal_high") or 0.0)
-                signal_low = float(raw.get("signal_low") or 0.0)
+                settings = get_strategy_settings(strategy_type=sig.strategy_type)
 
-                if signal_high <= 0 or signal_low <= 0 or ltp <= 0:
-                    continue
+                if sig.strategy_type == "MONTHLY_RSI":
+                    max_entry_gap_pct = settings.get("max_entry_gap_pct", 5.0)
+                    signal_close = float(raw.get("signal_close", 0.0))
 
-                # Reference price calculation
-                ref_price, is_gap_up = calculate_reference_price(signal_high, today_open)
-                raw["ref_price"] = ref_price
-                raw["is_gap_up"] = is_gap_up
-                sig.raw_signal_data = raw
+                    if signal_close <= 0 or today_open <= 0 or ltp <= 0:
+                        continue
 
-                # ── Signal Rejection Rules ──────────────────────────────────
-                rejection_reason = None
-                if today_low > 0 and today_low <= signal_low:
-                    rejection_reason = "SIGNAL_LOW_BROKEN"
-                    logger.warning(f"[ENGINE][3:25 PM] REJECTED {comp.trading_symbol}: Today Low ({today_low}) <= Signal Low ({signal_low})")
-                elif today_low > 0 and today_low <= (ref_price * 0.95):
-                    rejection_reason = "SIGNAL_HIGH_5_PERCENT_DRAWDOWN"
-                    logger.warning(f"[ENGINE][3:25 PM] REJECTED {comp.trading_symbol}: Today Low ({today_low}) <= Ref -5% ({ref_price * 0.95})")
+                    entry_gap_pct = ((today_open - signal_close) / signal_close) * 100
 
-                if rejection_reason:
-                    sig.status = "REJECTED"
-                    sig.rejection_reason = rejection_reason
-                    sig.rejection_date = datetime.utcnow()
-                    db.commit()
-                    rejected_count += 1
-                    continue
+                    if entry_gap_pct > max_entry_gap_pct:
+                        sig.status = "REJECTED"
+                        sig.rejection_reason = "ENTRY_GAP_TOO_LARGE"
+                        sig.rejection_date = datetime.utcnow()
+                        db.commit()
+                        rejected_count += 1
+                        logger.info(f"[ENGINE][3:25 PM] Signal REJECTED for {comp.trading_symbol}: Entry Gap ({entry_gap_pct:.2f}%) > Max ({max_entry_gap_pct}%)")
+                        continue
+                        
+                    cond_met = True
+                    log_msg = f"[ENGINE][3:25 PM] 🟢 ENTRY TRIGGERED for {comp.trading_symbol} (MONTHLY_RSI)! Gap: {entry_gap_pct:.2f}%"
+                    
+                else:
+                    # SUPERTREND logic
+                    if signal_high <= 0 or signal_low <= 0 or ltp <= 0:
+                        continue
 
-                # ── Entry Conditions Check (3:25 PM IST) ─────────────────────
-                # 1. Today High >= Reference * dynamic %
-                # 2. LTP > Signal High
-                breakout_multiplier = 1.0 + (settings["entry_high_breakout_pct"] / 100.0)
-                cond_high_breakout = (today_high >= (ref_price * breakout_multiplier))
-                cond_ltp_above_high = (ltp > signal_high)
+                    # Reference price calculation
+                    ref_price, is_gap_up = calculate_reference_price(signal_high, today_open)
+                    raw["ref_price"] = ref_price
+                    raw["is_gap_up"] = is_gap_up
+                    sig.raw_signal_data = raw
 
-                if cond_high_breakout and cond_ltp_above_high:
-                    logger.info(
-                        f"[ENGINE][3:25 PM] 🟢 ENTRY TRIGGERED for {comp.trading_symbol}! "
-                        f"High ({today_high}) >= Ref+{settings['entry_high_breakout_pct']}% ({ref_price * breakout_multiplier}) AND LTP ({ltp}) > Signal High ({signal_high})"
-                    )
+                    # ── Signal Rejection Rules ──────────────────────────────────
+                    rejection_reason = None
+                    if today_low > 0 and today_low <= signal_low:
+                        rejection_reason = "SIGNAL_LOW_BROKEN"
+                        logger.warning(f"[ENGINE][3:25 PM] REJECTED {comp.trading_symbol}: Today Low ({today_low}) <= Signal Low ({signal_low})")
+                    elif today_low > 0 and today_low <= (ref_price * 0.95):
+                        rejection_reason = "SIGNAL_HIGH_5_PERCENT_DRAWDOWN"
+                        logger.warning(f"[ENGINE][3:25 PM] REJECTED {comp.trading_symbol}: Today Low ({today_low}) <= Ref -5% ({ref_price * 0.95})")
+
+                    if rejection_reason:
+                        sig.status = "REJECTED"
+                        sig.rejection_reason = rejection_reason
+                        sig.rejection_date = datetime.utcnow()
+                        db.commit()
+                        rejected_count += 1
+                        continue
+
+                    # ── Entry Conditions Check (3:25 PM IST) ─────────────────────
+                    breakout_multiplier = 1.0 + (settings["entry_high_breakout_pct"] / 100.0)
+                    cond_high_breakout = (today_high >= (ref_price * breakout_multiplier))
+                    cond_ltp_above_high = (ltp > signal_high)
+
+                    cond_met = cond_high_breakout and cond_ltp_above_high
+                    log_msg = f"[ENGINE][3:25 PM] 🟢 ENTRY TRIGGERED for {comp.trading_symbol}! High ({today_high}) >= Ref+{settings['entry_high_breakout_pct']}% ({ref_price * breakout_multiplier}) AND LTP ({ltp}) > Signal High ({signal_high})"
+
+                    if not cond_met:
+                        # 3:25 PM entry conditions not met -> Reject signal
+                        sig.status = "REJECTED"
+                        sig.rejection_reason = "325_ENTRY_CONDITIONS_NOT_MET"
+                        sig.rejection_date = datetime.utcnow()
+                        db.commit()
+                        rejected_count += 1
+                        logger.info(
+                            f"[ENGINE][3:25 PM] Signal REJECTED for {comp.trading_symbol}: "
+                            f"HighBreakout={cond_high_breakout} (High={today_high} vs Ref+{settings['entry_high_breakout_pct']}%={ref_price * breakout_multiplier}), "
+                            f"LTPBreakout={cond_ltp_above_high} (LTP={ltp} vs High={signal_high})"
+                        )
+                        continue
+
+                # Common entry execution for all strategies
+                if cond_met:
+                    logger.info(log_msg)
 
                     try:
                         portfolio = self.portfolio_service.get_fund_limits()
@@ -543,7 +590,8 @@ class AutomatedStrategyEngine:
                             signal_id=sig.id,
                             quantity=quantity,
                             allocated_capital=allocated_capital,
-                            exchange_segment="NSE_EQ"
+                            exchange_segment="NSE_EQ",
+                            strategy_type=sig.strategy_type
                         )
 
                         if order_res.get("status") in ("placed", "executed"):
@@ -554,19 +602,6 @@ class AutomatedStrategyEngine:
 
                     except Exception as exc:
                         logger.error(f"[ENGINE][3:25 PM] Failed to execute entry for {comp.trading_symbol}: {exc}", exc_info=True)
-
-                else:
-                    # 3:25 PM entry conditions not met -> Reject signal
-                    sig.status = "REJECTED"
-                    sig.rejection_reason = "325_ENTRY_CONDITIONS_NOT_MET"
-                    sig.rejection_date = datetime.utcnow()
-                    db.commit()
-                    rejected_count += 1
-                    logger.info(
-                        f"[ENGINE][3:25 PM] Signal REJECTED for {comp.trading_symbol}: "
-                        f"HighBreakout={cond_high_breakout} (High={today_high} vs Ref+{settings['entry_high_breakout_pct']}%={ref_price * breakout_multiplier}), "
-                        f"LTPBreakout={cond_ltp_above_high} (LTP={ltp} vs High={signal_high})"
-                    )
 
             return {
                 "status": "completed",
@@ -635,6 +670,8 @@ class AutomatedStrategyEngine:
 
                 if live_close <= 0.0:
                     continue
+
+                settings = get_strategy_settings(strategy_type=trade.strategy_type)
 
                 try:
                     daily_candles = get_daily_candles_from_db(company.id, limit=60)
@@ -740,23 +777,40 @@ class AutomatedStrategyEngine:
                 daily_candles = get_daily_candles_from_db(company.id, limit=60)
                 weekly_candles = get_weekly_candles_from_db(company.id, limit=30)
 
-                if len(daily_candles) < 22 or len(weekly_candles) < 15:
-                    continue
+                # 1. Evaluate Supertrend
+                if len(daily_candles) >= 22 and len(weekly_candles) >= 15:
+                    market_cap_cr = float(company.market_cap or 0)
+                    signal = evaluate_stock_signal(
+                        symbol=company.trading_symbol,
+                        security_id=company.dhan_security_id,
+                        exchange_segment="NSE_EQ",
+                        daily_candles=daily_candles,
+                        weekly_candles=weekly_candles,
+                        market_cap_cr=market_cap_cr
+                    )
 
-                market_cap_cr = float(company.market_cap or 0)
-                signal = evaluate_stock_signal(
-                    symbol=company.trading_symbol,
-                    security_id=company.dhan_security_id,
-                    exchange_segment="NSE_EQ",
-                    daily_candles=daily_candles,
-                    weekly_candles=weekly_candles,
-                    market_cap_cr=market_cap_cr
-                )
+                    if signal:
+                        _save_signal_to_db(company.id, signal, strategy_type="SUPERTREND")
+                        new_signals.append(signal)
+                        logger.info(f"[ENGINE] NEW SUPERTREND SIGNAL: {company.trading_symbol}")
 
-                if signal:
-                    _save_signal_to_db(company.id, signal)
-                    new_signals.append(signal)
-                    logger.info(f"[ENGINE] NEW SIGNAL: {company.trading_symbol} — {signal['strategy']}")
+                # 2. Evaluate Monthly RSI
+                from app.services.monthly_rsi_strategy import evaluate_monthly_rsi_signal
+                from app.services.candle_sync import get_monthly_candles_from_db
+                monthly_candles = get_monthly_candles_from_db(company.id, limit=30)
+                if len(monthly_candles) >= 14:
+                    m_signal = evaluate_monthly_rsi_signal(
+                        symbol=company.trading_symbol,
+                        security_id=company.dhan_security_id,
+                        exchange_segment="NSE_EQ",
+                        daily_candles=daily_candles,
+                        monthly_candles=monthly_candles
+                    )
+                    
+                    if m_signal:
+                        _save_signal_to_db(company.id, m_signal, strategy_type="MONTHLY_RSI")
+                        new_signals.append(m_signal)
+                        logger.info(f"[ENGINE] NEW MONTHLY RSI SIGNAL: {company.trading_symbol}")
 
             except Exception as exc:
                 logger.warning(f"[ENGINE] Error evaluating {company.trading_symbol}: {exc}")
