@@ -476,15 +476,14 @@ class StrategySettings(Base):
     
     # Trade Management Parameters
     initial_sl_pct = Column(Float, default=-5.0) # -5%
-    target1_pct = Column(Float, default=12.0) # +12%
-    target2_pct = Column(Float, default=17.0) # +17%
+    target1_pct = Column(Float, default=17.0) # +17%
+    trade_stages = Column(JSON, default=[
+        {"trigger": 5.0, "trail": 2.0, "qty": 0.0},
+        {"trigger": 8.0, "trail": 4.0, "qty": 0.0},
+        {"trigger": 12.0, "trail": 5.0, "qty": 50.0}
+    ])
     
-    sl_stage1_trigger = Column(Float, default=5.0) # +5%
-    sl_stage1_trail = Column(Float, default=2.0)   # +2%
-    sl_stage2_trigger = Column(Float, default=8.0) # +8%
-    sl_stage2_trail = Column(Float, default=4.0)   # +4%
-    sl_stage3_trigger = Column(Float, default=12.0)# +12%
-    sl_stage3_trail = Column(Float, default=5.0)   # +5%
+    capital_allocation_pct = Column(Float, default=20.0)
     
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -518,5 +517,7 @@ class MonthlyRsiSettings(Base):
     partial_exit_qty_pct = Column(Float, default=0.0)
     partial_exit_profit_pct = Column(Float, default=10.0)
     partial_stop_profit_pct = Column(Float, default=0.0)
+    
+    capital_allocation_pct = Column(Float, default=20.0)
     
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)

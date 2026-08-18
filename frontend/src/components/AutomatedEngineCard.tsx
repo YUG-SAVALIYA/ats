@@ -94,15 +94,15 @@ export const AutomatedEngineCard: React.FC<AutomatedEngineCardProps> = ({ engine
             <span>Dhan Super Orders</span>
           </div>
           <div className="text-base font-bold font-mono text-white">MTF Bracket</div>
-          <div className="text-[11px] text-zinc-400">50% Leg A (+12% target) + 50% Leg B (base target)</div>
+          <div className="text-[11px] text-zinc-400">50% Leg A (+17% target) + 50% Leg B (base target)</div>
         </div>
 
-        <div className="bg-black border border-zinc-800 p-3.5 rounded-xl space-y-1">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-300">
-            <TrendingUp className="h-4 w-4 text-zinc-400" />
-            <span>Auto-Trailing Stop Loss</span>
+        <div className="bg-zinc-800/30 border border-zinc-700/50 rounded-lg p-3">
+          <div className="text-xs text-zinc-500 mb-1 flex items-center justify-between">
+            <span>Trailing Stop Loss</span>
+            <span className="text-[10px] bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-400">Dynamic</span>
           </div>
-          <div className="text-base font-bold font-mono text-white">Tiered (+5%, +8%, +12%)</div>
+          <div className="text-base font-bold font-mono text-white">Tiered (+5%, +8%, +17%)</div>
           <div className="text-[11px] text-zinc-400">Automatically modifies stop loss on Dhan OMS</div>
         </div>
 

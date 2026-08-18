@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api, StrategySettings, MonthlyRsiSettings } from '../services/api';
 import { useToast } from '../context/ToastContext';
-import { Save, RefreshCw } from 'lucide-react';
+import { Save, RefreshCw, Trash2, Plus } from 'lucide-react';
 import { useStrategy } from '../context/StrategyContext';
 
 interface SettingsProps {
@@ -47,8 +47,36 @@ export function Settings({ isLight }: SettingsProps) {
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setSettings((prev: any) => prev ? { ...prev, [name]: value === '' ? 0 : parseFloat(value) } : null);
+    const { name, value, type } = e.target;
+    setSettings((prev: any) => ({
+      ...prev,
+      [name]: type === 'number' ? parseFloat(value) : value
+    }));
+  };
+
+  const handleStageChange = (index: number, field: string, value: number) => {
+    setSettings((prev: any) => {
+      const newStages = [...(prev.trade_stages || [])];
+      newStages[index] = { ...newStages[index], [field]: isNaN(value) ? 0 : value };
+      return { ...prev, trade_stages: newStages };
+    });
+  };
+
+  const addStage = () => {
+    setSettings((prev: any) => {
+      const newStages = [...(prev.trade_stages || [])];
+      // default values for new stage
+      newStages.push({ trigger: 0, trail: 0, qty: 0 });
+      return { ...prev, trade_stages: newStages };
+    });
+  };
+
+  const removeStage = (index: number) => {
+    setSettings((prev: any) => {
+      const newStages = [...(prev.trade_stages || [])];
+      newStages.splice(index, 1);
+      return { ...prev, trade_stages: newStages };
+    });
   };
 
   if (isLoading) {
@@ -174,52 +202,51 @@ export function Settings({ isLight }: SettingsProps) {
                 <h2 className={sectionTitleClass}>Trade Management (SL & Targets)</h2>
                 
                 <div className="space-y-4">
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className={labelClass}>Initial SL (%)</label>
                       <input type="number" step="0.1" name="initial_sl_pct" value={settings.initial_sl_pct || ''} onChange={handleChange} className={inputClass} />
                     </div>
                     <div>
-                      <label className={labelClass}>Target 1 (%)</label>
+                      <label className={labelClass}>Target (%)</label>
                       <input type="number" step="0.1" name="target1_pct" value={settings.target1_pct || ''} onChange={handleChange} className={inputClass} />
                     </div>
-                    <div>
-                      <label className={labelClass}>Target 2 (%)</label>
-                      <input type="number" step="0.1" name="target2_pct" value={settings.target2_pct || ''} onChange={handleChange} className={inputClass} />
-                    </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4 mt-6">
-                    <div>
-                      <label className={labelClass}>Stage 1 Trigger (%)</label>
-                      <input type="number" step="0.1" name="sl_stage1_trigger" value={settings.sl_stage1_trigger || ''} onChange={handleChange} className={inputClass} />
+                  {settings.trade_stages?.map((stage: any, index: number) => (
+                    <div key={index} className="grid grid-cols-3 gap-4 mt-4 items-end">
+                      <div>
+                        <label className={labelClass}>Stage {index + 1} Trigger (%)</label>
+                        <input type="number" step="0.1" value={stage.trigger !== undefined ? stage.trigger : ''} onChange={(e) => handleStageChange(index, 'trigger', parseFloat(e.target.value))} className={inputClass} />
+                      </div>
+                      <div>
+                        <label className={labelClass}>Stage {index + 1} SL Trail (%)</label>
+                        <input type="number" step="0.1" value={stage.trail !== undefined ? stage.trail : ''} onChange={(e) => handleStageChange(index, 'trail', parseFloat(e.target.value))} className={inputClass} />
+                      </div>
+                      <div className="relative">
+                        <label className={labelClass}>Stage {index + 1} Sell Qty (%)</label>
+                        <div className="flex space-x-2">
+                          <input type="number" step="0.1" value={stage.qty !== undefined ? stage.qty : ''} onChange={(e) => handleStageChange(index, 'qty', parseFloat(e.target.value))} className={inputClass} />
+                          <button type="button" onClick={() => removeStage(index)} className="px-3 py-2 bg-red-900/40 text-red-400 border border-red-800 rounded-md hover:bg-red-900/60 transition-colors">
+                            <Trash2 className="w-5 h-5" /> 
+                          </button>
+                        </div>
+                      </div>
                     </div>
+                  ))}
+                  
+                  <div className="grid grid-cols-2 gap-4 mt-6 border-t border-zinc-800 pt-4">
                     <div>
-                      <label className={labelClass}>Stage 1 SL Trail (%)</label>
-                      <input type="number" step="0.1" name="sl_stage1_trail" value={settings.sl_stage1_trail || ''} onChange={handleChange} className={inputClass} />
+                      <label className={labelClass}>Capital Allocation Per Trade (%)</label>
+                      <input type="number" step="0.1" name="capital_allocation_pct" value={settings.capital_allocation_pct || ''} onChange={handleChange} className={inputClass} />
                     </div>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className={labelClass}>Stage 2 Trigger (%)</label>
-                      <input type="number" step="0.1" name="sl_stage2_trigger" value={settings.sl_stage2_trigger || ''} onChange={handleChange} className={inputClass} />
-                    </div>
-                    <div>
-                      <label className={labelClass}>Stage 2 SL Trail (%)</label>
-                      <input type="number" step="0.1" name="sl_stage2_trail" value={settings.sl_stage2_trail || ''} onChange={handleChange} className={inputClass} />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className={labelClass}>Stage 3 Trigger (%)</label>
-                      <input type="number" step="0.1" name="sl_stage3_trigger" value={settings.sl_stage3_trigger || ''} onChange={handleChange} className={inputClass} />
-                    </div>
-                    <div>
-                      <label className={labelClass}>Stage 3 SL Trail (%)</label>
-                      <input type="number" step="0.1" name="sl_stage3_trail" value={settings.sl_stage3_trail || ''} onChange={handleChange} className={inputClass} />
-                    </div>
+                  
+                  <div className="mt-4">
+                    <button type="button" onClick={addStage} className="px-4 py-2 bg-indigo-900/40 text-indigo-400 border border-indigo-800 rounded-md hover:bg-indigo-900/60 transition-colors text-sm font-medium flex items-center">
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add Stage
+                    </button>
                   </div>
                 </div>
               </div>
@@ -327,6 +354,13 @@ export function Settings({ isLight }: SettingsProps) {
                     <div>
                       <label className={labelClass}>Partial Trail %</label>
                       <input type="number" step="0.1" name="partial_stop_profit_pct" value={settings.partial_stop_profit_pct || ''} onChange={handleChange} className={inputClass} />
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4 mt-6 border-t border-zinc-800 pt-4">
+                    <div>
+                      <label className={labelClass}>Capital Allocation Per Trade (%)</label>
+                      <input type="number" step="0.1" name="capital_allocation_pct" value={settings.capital_allocation_pct || ''} onChange={handleChange} className={inputClass} />
                     </div>
                   </div>
                 </div>

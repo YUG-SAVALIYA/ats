@@ -358,10 +358,10 @@ def _save_signal_to_db(company_id: str, signal_dict: Dict[str, Any], strategy_ty
 
 
 def get_signals_from_db(status: Optional[str] = None, strategy_type: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
-    """Fetches signals from DB joined with companies."""
+    """Fetches signals from DB joined with companies and trades."""
     db = SessionLocal()
     try:
-        query = db.query(Signal, Company).join(Company, Signal.company_id == Company.id)
+        query = db.query(Signal, Company, Trade).join(Company, Signal.company_id == Company.id).outerjoin(Trade, Signal.id == Trade.signal_id)
         if status:
             query = query.filter(Signal.status == status)
         if strategy_type:
@@ -370,8 +370,14 @@ def get_signals_from_db(status: Optional[str] = None, strategy_type: Optional[st
         results = query.order_by(Signal.date.desc(), Signal.created_at.desc()).limit(limit).all()
 
         output = []
-        for sig, comp in results:
+        for sig, comp, trade in results:
             raw = sig.raw_signal_data or {}
+            
+            # Extract execution details if available
+            executed_price = trade.entry_price if trade else None
+            new_target_pct = trade.target_pct if trade else None
+            new_sl_pct = trade.stoploss_pct if trade else None
+
             output.append({
                 "id": sig.id,
                 "company_id": sig.company_id,
@@ -391,6 +397,9 @@ def get_signals_from_db(status: Optional[str] = None, strategy_type: Optional[st
                 "ref_price": raw.get("ref_price"),
                 "status": sig.status,
                 "rejection_reason": sig.rejection_reason,
+                "executed_price": executed_price,
+                "new_target_pct": new_target_pct,
+                "new_sl_pct": new_sl_pct,
                 "created_at": str(sig.created_at)
             })
         return output
@@ -576,8 +585,8 @@ class AutomatedStrategyEngine:
                         portfolio = self.portfolio_service.get_fund_limits()
                         avail_balance = float(portfolio.get("availabelBalance", portfolio.get("available_balance", 100000.0)) or 100000.0)
 
-                        max_allocation_per_trade = min(avail_balance * 0.20, 50000.0)
-                        allocated_capital = max(max_allocation_per_trade, 10000.0)
+                        capital_pct = settings.get("capital_allocation_pct", 20.0) / 100.0
+                        allocated_capital = max(avail_balance * capital_pct, 1000.0)
                         quantity = max(1, int(allocated_capital // ltp))
 
                         from app.core.executor import get_order_executor
@@ -730,13 +739,9 @@ class AutomatedStrategyEngine:
             db.close()
 
     def scan_signals_from_db(self) -> List[Dict[str, Any]]:
-        """Scan all active companies in DB after 100% candle sync & rate-limited fetching completes."""
+        """Scan all active companies in DB for signals."""
         global _automated_signals
-        logger.info("[ENGINE] Step 1: Checking missing candles & running 0.3s rate-limited fetch for all active companies...")
-
-        from app.services.candle_sync import sync_all_active_companies
-        sync_summary = sync_all_active_companies(limit=4000, delay_sec=0.3)
-        logger.info(f"[ENGINE] Step 1 Complete: candles fetched/updated ({sync_summary}). Step 2: Expiring stale signals...")
+        logger.info("[ENGINE] Starting signal scan...")
 
         # Expire any PENDING signals from prior trading days before generating new ones
         today = date.today()

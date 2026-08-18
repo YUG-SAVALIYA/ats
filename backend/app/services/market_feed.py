@@ -143,13 +143,19 @@ class MarketFeedManager:
         delay = _RECONNECT_BASE_DELAY
         while self._running:
             try:
+                start_time = time.time()
                 await self._connect_and_run()
-                delay = _RECONNECT_BASE_DELAY  # reset on clean run
+                # If we stayed connected for at least 30 seconds, reset back-off
+                if time.time() - start_time > 30.0:
+                    delay = _RECONNECT_BASE_DELAY
             except asyncio.CancelledError:
                 break
             except Exception as exc:
                 logger.warning(f"[WS] Connection lost: {exc}. Reconnecting in {delay:.0f}s…")
-                self._ws = None
+            
+            self._ws = None
+            if self._running:
+                logger.info(f"[WS] Waiting {delay:.0f}s before reconnecting...")
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, _RECONNECT_MAX_DELAY)
 

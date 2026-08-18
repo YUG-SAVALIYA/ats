@@ -25,60 +25,59 @@ def _r2(v: float) -> float:
 def compute_initial_levels(entry: float) -> dict:
     """Compute all price levels from actual fill price using dynamic settings."""
     settings = get_strategy_settings()
-    return {
+    levels = {
         "stop_price":         _r2(entry * (1 + settings["initial_sl_pct"] / 100.0)),
         "target1_price":      _r2(entry * (1 + settings["target1_pct"] / 100.0)),
-        "target2_price":      _r2(entry * (1 + settings["target2_pct"] / 100.0)),
-        "sl_stage_1_trigger": _r2(entry * (1 + settings["sl_stage1_trigger"] / 100.0)),
-        "sl_stage_2_trigger": _r2(entry * (1 + settings["sl_stage2_trigger"] / 100.0)),
-        "sl_stage_3_trigger": _r2(entry * (1 + settings["sl_stage3_trigger"] / 100.0)),
     }
+    
+    stages = settings.get("trade_stages", [])
+    for i, stage in enumerate(stages):
+        levels[f"sl_stage_{i+1}_trigger"] = _r2(entry * (1 + stage["trigger"] / 100.0))
+        
+    return levels
 
 
 def sl_price_for_stage(entry: float, stage: int) -> float:
-    """Return the SL price corresponding to a given stage."""
+    """Return the SL price corresponding to a given stage (0 is initial, 1 is index 0 of stages)."""
     settings = get_strategy_settings()
-    mapping = {
-        0: _r2(entry * (1 + settings["initial_sl_pct"] / 100.0)),
-        1: _r2(entry * (1 + settings["sl_stage1_trail"] / 100.0)),
-        2: _r2(entry * (1 + settings["sl_stage2_trail"] / 100.0)),
-        3: _r2(entry * (1 + settings["sl_stage3_trail"] / 100.0)),
-    }
-    return mapping.get(stage, mapping[0])
+    if stage == 0:
+        return _r2(entry * (1 + settings["initial_sl_pct"] / 100.0))
+        
+    stages = settings.get("trade_stages", [])
+    if stage > 0 and stage <= len(stages):
+        return _r2(entry * (1 + stages[stage - 1]["trail"] / 100.0))
+        
+    # Fallback to initial
+    return _r2(entry * (1 + settings["initial_sl_pct"] / 100.0))
 
 
-def stage_1_trigger(entry: float) -> float:
+def stage_trigger(entry: float, stage: int) -> float:
+    """Return the trigger price for a given stage (1 is index 0)."""
     settings = get_strategy_settings()
-    return _r2(entry * (1 + settings["sl_stage1_trigger"] / 100.0))
-
-
-def stage_2_trigger(entry: float) -> float:
-    settings = get_strategy_settings()
-    return _r2(entry * (1 + settings["sl_stage2_trigger"] / 100.0))
-
-
-def stage_3_trigger(entry: float) -> float:
-    settings = get_strategy_settings()
-    return _r2(entry * (1 + settings["sl_stage3_trigger"] / 100.0))
+    stages = settings.get("trade_stages", [])
+    if stage > 0 and stage <= len(stages):
+        return _r2(entry * (1 + stages[stage - 1]["trigger"] / 100.0))
+    return entry
 
 
 def final_target(entry: float) -> float:
     settings = get_strategy_settings()
-    return _r2(entry * (1 + settings["target2_pct"] / 100.0))
+    return _r2(entry * (1 + settings["target1_pct"] / 100.0))
 
 
 def next_sl_stage(current_stage: int, ltp: float, entry: float) -> int:
     """Return the new SL stage given LTP and entry price. Stages only move UP."""
-    if current_stage >= 3:
-        return 3
-    if ltp >= stage_3_trigger(entry):
-        return 3
-    if current_stage >= 2:
-        return 2
-    if ltp >= stage_2_trigger(entry):
-        return 2
-    if current_stage >= 1:
-        return 1
-    if ltp >= stage_1_trigger(entry):
-        return 1
-    return 0
+    settings = get_strategy_settings()
+    stages = settings.get("trade_stages", [])
+    max_stage = len(stages)
+    
+    if current_stage >= max_stage:
+        return max_stage
+        
+    # Check from highest possible stage down to current_stage + 1
+    for i in range(max_stage, current_stage, -1):
+        trigger_price = stage_trigger(entry, i)
+        if ltp >= trigger_price:
+            return i
+            
+    return current_stage

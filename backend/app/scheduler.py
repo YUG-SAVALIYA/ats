@@ -45,8 +45,23 @@ def scheduled_325_execution():
         logger.error(f"[SCHEDULER] 3:25 PM Execution failed: {exc}")
 
 
-def scheduled_post_market_scan():
-    """Runs post-market candle sync & signal scanning."""
+def scheduled_post_market_candle_sync():
+    """Runs post-market full candle sync."""
+    now = datetime.now()
+    if not is_trading_day(now.date()):
+        logger.info(f"[SCHEDULER] Skipping post-market candle sync because {now.date()} is not a trading day.")
+        return
+
+    logger.info("[SCHEDULER] Triggering post-market candle sync...")
+    try:
+        sync_all_active_companies(limit=4000)
+        logger.info("[SCHEDULER] Post-market candle sync completed.")
+    except Exception as exc:
+        logger.error(f"[SCHEDULER] Post-market candle sync failed: {exc}")
+
+
+def scheduled_post_market_signal_scan():
+    """Runs post-market signal scanning."""
     now = datetime.now()
     if not is_trading_day(now.date()):
         logger.info(f"[SCHEDULER] Skipping signal scan because {now.date()} is not a trading day.")
@@ -54,10 +69,6 @@ def scheduled_post_market_scan():
 
     logger.info("[SCHEDULER] Triggering post-market signal scan...")
     try:
-        # First, ensure we have all today's candles for all active companies
-        logger.info("[SCHEDULER] Running full candle sync before signal scan...")
-        sync_all_active_companies(limit=4000)
-        
         from app.services.strategy import get_strategy_engine
         engine = get_strategy_engine()
         new_signals = engine.scan_signals_from_db()
@@ -112,10 +123,18 @@ def start_scheduler():
     )
     
     scheduler.add_job(
-        scheduled_post_market_scan,
+        scheduled_post_market_candle_sync,
         trigger=CronTrigger(day_of_week='mon-fri', hour=15, minute=40),
-        id='scan_signals_1540',
-        name='Post-Market Signal Scan at 3:40 PM',
+        id='sync_candles_1540',
+        name='Post-Market Candle Sync at 3:40 PM',
+        replace_existing=True
+    )
+    
+    scheduler.add_job(
+        scheduled_post_market_signal_scan,
+        trigger=CronTrigger(day_of_week='mon-fri', hour=16, minute=0),
+        id='scan_signals_1600',
+        name='Post-Market Signal Scan at 4:00 PM',
         replace_existing=True
     )
     

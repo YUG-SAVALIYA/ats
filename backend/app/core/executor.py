@@ -625,7 +625,6 @@ class OrderExecutor:
             trade.remaining_quantity = fill_qty
             trade.stop_price = levels["stop_price"]
             trade.target1_price = levels["target1_price"]
-            trade.target2_price = levels["target2_price"]
             trade.sl_stage = 0
             
             from app.core.state_machine import validate_state_transition

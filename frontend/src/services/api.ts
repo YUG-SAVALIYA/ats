@@ -88,6 +88,8 @@ export interface StrategySignal {
   ref_price?: number;
   daily_rsi?: number;
   weekly_rsi?: number;
+  candle_range?: number;
+  supertrend_flip?: boolean;
   market_cap_cr?: number;
   target_price?: number;
   stop_loss?: number;
@@ -95,6 +97,9 @@ export interface StrategySignal {
   status: string;
   strategy?: string;
   rejection_reason?: string;
+  executed_price?: number;
+  new_target_pct?: number;
+  new_sl_pct?: number;
   created_at?: string | number;
 }
 
@@ -113,13 +118,12 @@ export interface StrategySettings {
   entry_high_breakout_pct: number;
   initial_sl_pct: number;
   target1_pct: number;
-  target2_pct: number;
-  sl_stage1_trigger: number;
-  sl_stage1_trail: number;
-  sl_stage2_trigger: number;
-  sl_stage2_trail: number;
-  sl_stage3_trigger: number;
-  sl_stage3_trail: number;
+  capital_allocation_pct: number;
+  trade_stages: {
+    trigger: number;
+    trail: number;
+    qty: number;
+  }[];
 }
 
 export interface MonthlyRsiSettings {
@@ -144,6 +148,7 @@ export interface MonthlyRsiSettings {
   partial_exit_qty_pct: number;
   partial_exit_profit_pct: number;
   partial_stop_profit_pct: number;
+  capital_allocation_pct: number;
 }
 
 export const api = {

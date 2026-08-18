@@ -155,13 +155,17 @@ def sync_candles_for_company(
     latest_db_date = get_latest_candle_date_from_db(company_id)
 
     if not force_full and latest_db_date:
-        if latest_db_date >= today:
-            logger.info(f"[CANDLE SYNC] Company {security_id} already up-to-date ({latest_db_date}). Skipping API call.")
-            return {"daily_inserted": 0, "weekly_inserted": 0, "skipped": True}
-
-        from_date = latest_db_date.strftime("%Y-%m-%d")
+        # 5-Day Gap Check: Always fetch at least the last 5 days to self-heal missing candles.
+        lookback_date = today - timedelta(days=5)
+        
+        # If the database is older than 5 days, fetch from that older date instead
+        if latest_db_date < lookback_date:
+            from_date = latest_db_date.strftime("%Y-%m-%d")
+        else:
+            from_date = lookback_date.strftime("%Y-%m-%d")
+            
         to_date = today.strftime("%Y-%m-%d")
-        logger.info(f"[CANDLE SYNC] Missing candles check for sec_id={security_id} (DB max: {latest_db_date}). Fetching {from_date} to {to_date}...")
+        logger.info(f"[CANDLE SYNC] 5-Day Gap Check for sec_id={security_id}. Fetching {from_date} to {to_date}...")
     else:
         from_date = (today - timedelta(days=365)).strftime("%Y-%m-%d")
         to_date = today.strftime("%Y-%m-%d")
@@ -206,7 +210,7 @@ def sync_actionable_companies(delay_sec: float = SYMBOL_FETCH_DELAY_SEC) -> Dict
         signal_comp_ids = [r[0] for r in db.query(Signal.company_id).filter(Signal.status == "ACTIVE").all()]
         
         # Get companies with open or pending trades
-        trade_comp_ids = [r[0] for r in db.query(Trade.company_id).filter(Trade.status.in_(["OPEN", "ENTRY_PENDING", "EXIT_PENDING"])).all()]
+        trade_comp_ids = [r[0] for r in db.query(Trade.company_id).filter(Trade.ats_state.in_(["OPEN", "ENTRY_PENDING", "PARTIAL_EXIT", "EXIT_REQUESTED"])).all()]
         
         actionable_ids = set(signal_comp_ids + trade_comp_ids)
         

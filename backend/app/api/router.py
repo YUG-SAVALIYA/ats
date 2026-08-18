@@ -699,13 +699,8 @@ class StrategySettingsUpdate(BaseModel):
     entry_high_breakout_pct: float
     initial_sl_pct: float
     target1_pct: float
-    target2_pct: float
-    sl_stage1_trigger: float
-    sl_stage1_trail: float
-    sl_stage2_trigger: float
-    sl_stage2_trail: float
-    sl_stage3_trigger: float
-    sl_stage3_trail: float
+    trade_stages: List[Dict[str, float]]
+    capital_allocation_pct: float
 
 
 class MonthlyRsiSettingsUpdate(BaseModel):
@@ -730,6 +725,7 @@ class MonthlyRsiSettingsUpdate(BaseModel):
     partial_exit_qty_pct: float
     partial_exit_profit_pct: float
     partial_stop_profit_pct: float
+    capital_allocation_pct: float
 
 @router.get("/settings/strategy")
 def get_strategy_settings_api():
@@ -759,7 +755,18 @@ def update_strategy_settings_api(settings: StrategySettingsUpdate):
         
         # Invalidate cache
         from app.services.settings import settings_manager
-        settings_manager._cached_settings = None
+        settings_manager._cached_supertrend = None
+        
+        # Apply retroactively
+        from app.core.engine import get_trade_engine
+        engine = get_trade_engine()
+        if engine:
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(engine.recalculate_active_trades())
+            except RuntimeError:
+                asyncio.run(engine.recalculate_active_trades())
         
         return {"status": "success", "message": "Strategy settings updated"}
     except Exception as exc:
@@ -800,6 +807,20 @@ def update_monthly_rsi_settings_api(settings: MonthlyRsiSettingsUpdate):
         db.commit()
         db.refresh(db_settings)
         db.close()
+        # Invalidate cache
+        from app.services.settings import settings_manager
+        settings_manager._cached_monthly = None
+        
+        # Apply retroactively
+        from app.core.engine import get_trade_engine
+        engine = get_trade_engine()
+        if engine:
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(engine.recalculate_active_trades())
+            except RuntimeError:
+                asyncio.run(engine.recalculate_active_trades())
         
         return {"status": "success", "message": "Monthly RSI settings updated"}
     except Exception as exc:

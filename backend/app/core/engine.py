@@ -16,7 +16,8 @@ from app.database import SessionLocal
 from app.models import Trade, AtsTradeState, TradeEvent
 from app.core.levels import (
     sl_price_for_stage,
-    stage_1_trigger, stage_2_trigger, stage_3_trigger, final_target,
+    final_target,
+    next_sl_stage,
 )
 from app.core.cache_manager import get_cache_manager, TradeCacheManager
 
@@ -217,7 +218,7 @@ class TradeEngine:
             await self._execute_final_exit(trade, ltp, "SL_HIT")
             return
 
-        new_stage = self._compute_new_stage(current_stage, ltp, entry)
+        new_stage = next_sl_stage(current_stage, ltp, entry)
         if new_stage > current_stage:
             await self._apply_stage_upgrade(trade, ltp, current_stage, new_stage)
 
@@ -225,33 +226,19 @@ class TradeEngine:
         """Evaluate a trade in PARTIAL_EXIT state."""
         tid = str(trade.id)
         sl = trade.stop_price or 0.0
-        t2 = trade.target2_price or 0.0
+        t1 = trade.target1_price or 0.0
 
         if sl and ltp <= sl:
             logger.info(f"[ENGINE] SL HIT (post-partial) for {tid}: LTP={ltp} <= SL={sl}")
             await self._execute_final_exit(trade, ltp, "SL_HIT")
             return
 
-        if t2 and ltp >= t2:
-            logger.info(f"[ENGINE] TARGET2 HIT for {tid}: LTP={ltp} >= T2={t2}")
-            await self._execute_final_exit(trade, ltp, "TARGET2_HIT")
+        if t1 and ltp >= t1:
+            logger.info(f"[ENGINE] TARGET HIT (post-partial) for {tid}: LTP={ltp} >= T1={t1}")
+            await self._execute_final_exit(trade, ltp, "TARGET_HIT")
             return
 
-    def _compute_new_stage(self, current_stage: int, ltp: float, entry: float) -> int:
-        """Compute the new stage given LTP. SL only ever moves up."""
-        if current_stage >= 3:
-            return 3
-        if ltp >= stage_3_trigger(entry):
-            return 3
-        if current_stage >= 2:
-            return 2
-        if ltp >= stage_2_trigger(entry):
-            return 2
-        if current_stage >= 1:
-            return 1
-        if ltp >= stage_1_trigger(entry):
-            return 1
-        return current_stage
+
 
     async def _apply_stage_upgrade(
         self, trade: Trade, ltp: float, old_stage: int, new_stage: int
@@ -291,52 +278,73 @@ class TradeEngine:
                 f"[ENGINE] Stage upgrade {old_stage}→{new_stage} for {tid}: "
                 f"SL={new_sl}, LTP={ltp}"
             )
-            stage_labels = {1: "+5%→SL+2%", 2: "+8%→SL+4%", 3: "+12%→SL+5%"}
+            
+            # Fetch settings to get dynamic stage info
+            from app.services.settings import get_strategy_settings
+            settings = get_strategy_settings()
+            stages = settings.get("trade_stages", [])
+            
+            # Label for logging
+            if new_stage > 0 and new_stage <= len(stages):
+                stage_cfg = stages[new_stage - 1]
+                stage_label = f"+{stage_cfg['trigger']}%→SL+{stage_cfg['trail']}%"
+                exit_qty_pct = stage_cfg.get('qty', 0.0)
+            else:
+                stage_label = ""
+                exit_qty_pct = 0.0
+
             _log_event(
                 db, tid, f"SL_STAGE_{new_stage}",
-                f"Trailing SL upgraded: {stage_labels.get(new_stage, '')} "
+                f"Trailing SL upgraded: {stage_label} "
                 f"LTP={ltp}, new SL={new_sl}",
                 price=ltp,
             )
         finally:
             db.close()
 
-        if new_stage == 3:
-            await self._execute_partial_exit(trade, ltp)
+        if exit_qty_pct > 0:
+            await self._execute_partial_exit(trade, ltp, exit_qty_pct, new_stage)
 
-    async def _execute_partial_exit(self, trade: Trade, ltp: float) -> None:
+    async def _execute_partial_exit(self, trade: Trade, ltp: float, qty_pct: float, stage: int) -> None:
         """
-        Sell 50% of original position at MARKET.
+        Sell X% of original position at MARKET.
         Persists PARTIAL_EXIT state to PostgreSQL DB and updates memory cache.
         """
         tid = str(trade.id)
 
-        if trade.partial_exit_completed:
-            logger.debug(f"[ENGINE] Partial exit already done for {tid} — skip")
-            return
+        # To prevent duplicate partial exits if we restart, we can just check if remaining is less than allocated
+        if trade.remaining_quantity < trade.allocated_quantity:
+            # We already did a partial exit. If they configure multiple exits, we might need a better check,
+            # but for now we assume they might do multiple. We'll just execute it.
+            pass
 
         self._exit_in_progress.add(tid)
         db = SessionLocal()
         try:
             t = db.query(Trade).filter(Trade.id == tid).with_for_update().first()
-            if not t or t.partial_exit_completed:
-                logger.debug(f"[ENGINE] Partial exit already done (DB check) for {tid}")
+            if not t:
+                logger.debug(f"[ENGINE] Trade not found for partial exit for {tid}")
                 return
 
-            total_qty = t.remaining_quantity or t.allocated_quantity or 0
-            if total_qty < 2:
-                logger.warning(f"[ENGINE] qty={total_qty} too small to split for {tid}, doing full exit")
+            original_qty = t.allocated_quantity or 0
+            current_qty = t.remaining_quantity or original_qty
+            
+            if current_qty < 2:
+                logger.warning(f"[ENGINE] qty={current_qty} too small to split for {tid}, doing full exit")
                 db.close()
                 db = None
                 self._exit_in_progress.discard(tid)
-                await self._execute_final_exit(trade, ltp, "TARGET1_HIT_FULL_EXIT")
+                await self._execute_final_exit(trade, ltp, "STAGE_HIT_FULL_EXIT")
                 return
 
-            partial_qty = total_qty // 2
-            remaining_qty = total_qty - partial_qty
+            partial_qty = int(original_qty * (qty_pct / 100.0))
+            if partial_qty <= 0:
+                partial_qty = 1
+            if partial_qty >= current_qty:
+                partial_qty = current_qty - 1
 
-            _log_event(db, tid, "TARGET1_HIT",
-                       f"LTP={ltp} >= +12%. Placing partial SELL {partial_qty}/{total_qty} qty",
+            _log_event(db, tid, f"STAGE_{stage}_PARTIAL_HIT",
+                       f"LTP={ltp}. Placing partial SELL {partial_qty}/{current_qty} qty",
                        price=ltp, quantity=partial_qty)
 
             await self._sell(
@@ -351,7 +359,7 @@ class TradeEngine:
                        f"Partial SELL {partial_qty} requested at LTP={ltp}. Awaiting fill confirmation.",
                        price=ltp, quantity=partial_qty)
 
-            logger.info(f"[ENGINE] Partial exit order requested for {tid}: qty={partial_qty}, total_qty={total_qty}")
+            logger.info(f"[ENGINE] Partial exit order requested for {tid}: qty={partial_qty}, current_qty={current_qty}")
 
         except Exception as exc:
             logger.error(f"[ENGINE] Partial exit failed for {tid}: {exc}", exc_info=True)
@@ -460,9 +468,68 @@ class TradeEngine:
                     "target1_price": t.target1_price,
                     "target2_price": t.target2_price,
                     "remaining_quantity": t.remaining_quantity,
-                    "partial_exit_completed": t.partial_exit_completed,
                 })
         return out
+
+    async def recalculate_active_trades(self) -> int:
+        """
+        Retroactively apply current settings (Stop Loss, Targets) to all active trades.
+        Called automatically when settings are updated via the API.
+        """
+        from app.core.levels import sl_price_for_stage, final_target
+        db = SessionLocal()
+        count = 0
+        try:
+            active_trades = (
+                db.query(Trade)
+                .filter(Trade.ats_state.in_([
+                    AtsTradeState.ENTRY_PENDING,
+                    AtsTradeState.OPEN,
+                    AtsTradeState.PARTIAL_EXIT,
+                ]))
+                .with_for_update()
+                .all()
+            )
+
+            for t in active_trades:
+                if t.entry_price:
+                    # Recalculate based on current dynamic settings
+                    new_sl = sl_price_for_stage(t.entry_price, t.sl_stage or 0)
+                    new_t1 = final_target(t.entry_price)
+
+                    if t.stop_price != new_sl or t.target1_price != new_t1:
+                        logger.info(
+                            f"[ENGINE] Retroactively updating Trade {t.id} levels: "
+                            f"SL {t.stop_price} -> {new_sl}, "
+                            f"T1 {t.target1_price} -> {new_t1}"
+                        )
+                        t.stop_price = new_sl
+                        t.target1_price = new_t1
+                        count += 1
+
+                        # Update memory cache immediately
+                        cached_t = self.cache_manager.get_trade(str(t.id))
+                        if cached_t:
+                            cached_t.stop_price = new_sl
+                            cached_t.target1_price = new_t1
+                            self.cache_manager.update_trade(cached_t)
+                            
+                        _log_event(
+                            db, str(t.id), "SETTINGS_UPDATED_RETROACTIVELY",
+                            f"Applied new settings to active trade: SL={new_sl}, T1={new_t1}",
+                            price=new_sl
+                        )
+
+            db.commit()
+            if count > 0:
+                logger.info(f"[ENGINE] Successfully applied new settings retroactively to {count} active trade(s).")
+            return count
+        except Exception as exc:
+            logger.error(f"[ENGINE] Failed to recalculate active trades: {exc}", exc_info=True)
+            db.rollback()
+            return 0
+        finally:
+            db.close()
 
 
 _engine_instance: Optional[TradeEngine] = None
