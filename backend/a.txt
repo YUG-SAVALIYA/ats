@@ -1,0 +1,259 @@
+================================================================================
+DAILY CANDLE DATA FETCHED USING _fetch_ohlcv_from_dhan AND TEMP_TOKEN
+Fetch Timestamp: 2026-08-25 17:27:31 | From: 2026-08-20 To: 2026-08-25
+================================================================================
+
+Company: HDFCBANK | Security ID: 1333 | Segment: NSE_EQ
+Total Candles Fetched: 3
+Latest Candle (2026-08-24): Open=732.5, High=734.4, Low=724.1, Close=729.0, Volume=11408345
+All Candles:
+  - Date: 2026-08-20 | Open: 725.5      | High: 728.3      | Low: 724.3      | Close: 725.05     | Volume: 17603805
+  - Date: 2026-08-21 | Open: 728.3      | High: 732.8      | Low: 726.6      | Close: 726.95     | Volume: 26029811
+  - Date: 2026-08-24 | Open: 732.5      | High: 734.4      | Low: 724.1      | Close: 729.0      | Volume: 11408345
+--------------------------------------------------------------------------------
+Company: RELIANCE | Security ID: 2885 | Segment: NSE_EQ
+Total Candles Fetched: 3
+Latest Candle (2026-08-24): Open=1316.6, High=1320.0, Low=1302.4, Close=1309.8, Volume=7277167
+All Candles:
+  - Date: 2026-08-20 | Open: 1315.5     | High: 1316.5     | Low: 1307.0     | Close: 1313.2     | Volume: 5546227
+  - Date: 2026-08-21 | Open: 1314.0     | High: 1316.0     | Low: 1308.0     | Close: 1316.0     | Volume: 5434871
+  - Date: 2026-08-24 | Open: 1316.6     | High: 1320.0     | Low: 1302.4     | Close: 1309.8     | Volume: 7277167
+--------------------------------------------------------------------------------
+Company: TCS | Security ID: 11536 | Segment: NSE_EQ
+Total Candles Fetched: 3
+Latest Candle (2026-08-24): Open=2302.4, High=2321.6, Low=2279.5, Close=2284.1, Volume=1542723
+All Candles:
+  - Date: 2026-08-20 | Open: 2319.4     | High: 2329.0     | Low: 2288.1     | Close: 2298.0     | Volume: 2047848
+  - Date: 2026-08-21 | Open: 2290.1     | High: 2307.2     | Low: 2263.3     | Close: 2302.0     | Volume: 2066749
+  - Date: 2026-08-24 | Open: 2302.4     | High: 2321.6     | Low: 2279.5     | Close: 2284.1     | Volume: 1542723
+--------------------------------------------------------------------------------
+Company: INFY | Security ID: 1594 | Segment: NSE_EQ
+Total Candles Fetched: 3
+Latest Candle (2026-08-24): Open=1126.5, High=1144.5, Low=1122.0, Close=1130.0, Volume=8565354
+All Candles:
+  - Date: 2026-08-20 | Open: 1143.0     | High: 1144.7     | Low: 1125.7     | Close: 1130.0     | Volume: 8559841
+  - Date: 2026-08-21 | Open: 1133.0     | High: 1133.5     | Low: 1118.0     | Close: 1121.0     | Volume: 6094967
+  - Date: 2026-08-24 | Open: 1126.5     | High: 1144.5     | Low: 1122.0     | Close: 1130.0     | Volume: 8565354
+--------------------------------------------------------------------------------
+Company: ITC | Security ID: 1660 | Segment: NSE_EQ
+Total Candles Fetched: 3
+Latest Candle (2026-08-24): Open=270.6, High=270.6, Low=267.0, Close=269.7, Volume=8518400
+All Candles:
+  - Date: 2026-08-20 | Open: 268.2      | High: 271.65     | Low: 265.0      | Close: 271.65     | Volume: 28272797
+  - Date: 2026-08-21 | Open: 271.6      | High: 271.6      | Low: 269.0      | Close: 269.4      | Volume: 8312928
+  - Date: 2026-08-24 | Open: 270.6      | High: 270.6      | Low: 267.0      | Close: 269.7      | Volume: 8518400
+--------------------------------------------------------------------------------
+
+RAW JSON DATA:
+[
+  {
+    "company": "HDFCBANK",
+    "security_id": "1333",
+    "exchange_segment": "NSE_EQ",
+    "from_date": "2026-08-20",
+    "to_date": "2026-08-25",
+    "candles_count": 3,
+    "candles": [
+      {
+        "date": "2026-08-20",
+        "open": 725.5,
+        "high": 728.3,
+        "low": 724.3,
+        "close": 725.05,
+        "volume": 17603805
+      },
+      {
+        "date": "2026-08-21",
+        "open": 728.3,
+        "high": 732.8,
+        "low": 726.6,
+        "close": 726.95,
+        "volume": 26029811
+      },
+      {
+        "date": "2026-08-24",
+        "open": 732.5,
+        "high": 734.4,
+        "low": 724.1,
+        "close": 729.0,
+        "volume": 11408345
+      }
+    ],
+    "latest_candle": {
+      "date": "2026-08-24",
+      "open": 732.5,
+      "high": 734.4,
+      "low": 724.1,
+      "close": 729.0,
+      "volume": 11408345
+    }
+  },
+  {
+    "company": "RELIANCE",
+    "security_id": "2885",
+    "exchange_segment": "NSE_EQ",
+    "from_date": "2026-08-20",
+    "to_date": "2026-08-25",
+    "candles_count": 3,
+    "candles": [
+      {
+        "date": "2026-08-20",
+        "open": 1315.5,
+        "high": 1316.5,
+        "low": 1307.0,
+        "close": 1313.2,
+        "volume": 5546227
+      },
+      {
+        "date": "2026-08-21",
+        "open": 1314.0,
+        "high": 1316.0,
+        "low": 1308.0,
+        "close": 1316.0,
+        "volume": 5434871
+      },
+      {
+        "date": "2026-08-24",
+        "open": 1316.6,
+        "high": 1320.0,
+        "low": 1302.4,
+        "close": 1309.8,
+        "volume": 7277167
+      }
+    ],
+    "latest_candle": {
+      "date": "2026-08-24",
+      "open": 1316.6,
+      "high": 1320.0,
+      "low": 1302.4,
+      "close": 1309.8,
+      "volume": 7277167
+    }
+  },
+  {
+    "company": "TCS",
+    "security_id": "11536",
+    "exchange_segment": "NSE_EQ",
+    "from_date": "2026-08-20",
+    "to_date": "2026-08-25",
+    "candles_count": 3,
+    "candles": [
+      {
+        "date": "2026-08-20",
+        "open": 2319.4,
+        "high": 2329.0,
+        "low": 2288.1,
+        "close": 2298.0,
+        "volume": 2047848
+      },
+      {
+        "date": "2026-08-21",
+        "open": 2290.1,
+        "high": 2307.2,
+        "low": 2263.3,
+        "close": 2302.0,
+        "volume": 2066749
+      },
+      {
+        "date": "2026-08-24",
+        "open": 2302.4,
+        "high": 2321.6,
+        "low": 2279.5,
+        "close": 2284.1,
+        "volume": 1542723
+      }
+    ],
+    "latest_candle": {
+      "date": "2026-08-24",
+      "open": 2302.4,
+      "high": 2321.6,
+      "low": 2279.5,
+      "close": 2284.1,
+      "volume": 1542723
+    }
+  },
+  {
+    "company": "INFY",
+    "security_id": "1594",
+    "exchange_segment": "NSE_EQ",
+    "from_date": "2026-08-20",
+    "to_date": "2026-08-25",
+    "candles_count": 3,
+    "candles": [
+      {
+        "date": "2026-08-20",
+        "open": 1143.0,
+        "high": 1144.7,
+        "low": 1125.7,
+        "close": 1130.0,
+        "volume": 8559841
+      },
+      {
+        "date": "2026-08-21",
+        "open": 1133.0,
+        "high": 1133.5,
+        "low": 1118.0,
+        "close": 1121.0,
+        "volume": 6094967
+      },
+      {
+        "date": "2026-08-24",
+        "open": 1126.5,
+        "high": 1144.5,
+        "low": 1122.0,
+        "close": 1130.0,
+        "volume": 8565354
+      }
+    ],
+    "latest_candle": {
+      "date": "2026-08-24",
+      "open": 1126.5,
+      "high": 1144.5,
+      "low": 1122.0,
+      "close": 1130.0,
+      "volume": 8565354
+    }
+  },
+  {
+    "company": "ITC",
+    "security_id": "1660",
+    "exchange_segment": "NSE_EQ",
+    "from_date": "2026-08-20",
+    "to_date": "2026-08-25",
+    "candles_count": 3,
+    "candles": [
+      {
+        "date": "2026-08-20",
+        "open": 268.2,
+        "high": 271.65,
+        "low": 265.0,
+        "close": 271.65,
+        "volume": 28272797
+      },
+      {
+        "date": "2026-08-21",
+        "open": 271.6,
+        "high": 271.6,
+        "low": 269.0,
+        "close": 269.4,
+        "volume": 8312928
+      },
+      {
+        "date": "2026-08-24",
+        "open": 270.6,
+        "high": 270.6,
+        "low": 267.0,
+        "close": 269.7,
+        "volume": 8518400
+      }
+    ],
+    "latest_candle": {
+      "date": "2026-08-24",
+      "open": 270.6,
+      "high": 270.6,
+      "low": 267.0,
+      "close": 269.7,
+      "volume": 8518400
+    }
+  }
+]

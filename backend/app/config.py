@@ -54,6 +54,7 @@ class Config:
 
 def load_config() -> Config:
     database_url = os.getenv("DATABASE_URL", "").strip()
+    data_client_env = os.getenv("DATA_CLIENT_ID", "").strip()
 
     client_id = ""
     access_token = ""
@@ -65,7 +66,6 @@ def load_config() -> Config:
     data_pin = ""
     data_totp_secret = ""
 
-    # Load 100% of broker credentials dynamically from PostgreSQL `creds` DB table. Zero hardcoded literals.
     if database_url:
         try:
             from sqlalchemy import create_engine, text
@@ -73,20 +73,51 @@ def load_config() -> Config:
 
             temp_engine = create_engine(database_url, pool_pre_ping=True)
             with temp_engine.connect() as conn:
-                rows = conn.execute(text('SELECT client_id, access_token, pin, totp_secret FROM creds ORDER BY created_at ASC')).fetchall()
-                for r in rows:
-                    cid, db_tok, db_pin, db_totp = r
-                    cid_str = str(cid or "").strip()
-                    if cid_str == "1111482994":
-                        data_client_id = cid_str
-                        data_access_token = decrypt_token(str(db_tok)) if db_tok else ""
-                        data_pin = decrypt_token(str(db_pin)) if db_pin else ""
-                        data_totp_secret = decrypt_token(str(db_totp)) if db_totp else ""
-                    elif cid_str:
-                        client_id = cid_str
-                        access_token = decrypt_token(str(db_tok)) if db_tok else ""
-                        pin = decrypt_token(str(db_pin)) if db_pin else ""
-                        totp_secret = decrypt_token(str(db_totp)) if db_totp else ""
+                # 1. Try loading from primary `dhan_accounts` table
+                try:
+                    acc_rows = conn.execute(text(
+                        'SELECT client_id, access_token, pin, totp_secret, is_data_account '
+                        'FROM dhan_accounts WHERE account_status = :status ORDER BY created_at ASC'
+                    ), {"status": "ACTIVE"}).fetchall()
+                    
+                    for r in acc_rows:
+                        cid, db_tok, db_pin, db_totp, is_data = r
+                        cid_str = str(cid or "").strip()
+                        
+                        # Designated data account condition
+                        if is_data or (data_client_env and cid_str == data_client_env) or (not data_client_id and cid_str == "1111482994"):
+                            data_client_id = cid_str
+                            data_access_token = decrypt_token(str(db_tok)) if db_tok else ""
+                            data_pin = decrypt_token(str(db_pin)) if db_pin else ""
+                            data_totp_secret = decrypt_token(str(db_totp)) if db_totp else ""
+                        elif cid_str:
+                            client_id = cid_str
+                            access_token = decrypt_token(str(db_tok)) if db_tok else ""
+                            pin = decrypt_token(str(db_pin)) if db_pin else ""
+                            totp_secret = decrypt_token(str(db_totp)) if db_totp else ""
+                except Exception as acc_exc:
+                    logger.debug("[CONFIG] dhan_accounts query notice: %s", acc_exc)
+
+                # 2. Fallback to legacy `creds` table if data_client_id or client_id still missing
+                if not data_client_id or not client_id:
+                    try:
+                        rows = conn.execute(text('SELECT client_id, access_token, pin, totp_secret FROM creds ORDER BY created_at ASC')).fetchall()
+                        for r in rows:
+                            cid, db_tok, db_pin, db_totp = r
+                            cid_str = str(cid or "").strip()
+                            if (data_client_env and cid_str == data_client_env) or cid_str == "1111482994":
+                                if not data_client_id:
+                                    data_client_id = cid_str
+                                    data_access_token = decrypt_token(str(db_tok)) if db_tok else ""
+                                    data_pin = decrypt_token(str(db_pin)) if db_pin else ""
+                                    data_totp_secret = decrypt_token(str(db_totp)) if db_totp else ""
+                            elif cid_str and not client_id:
+                                client_id = cid_str
+                                access_token = decrypt_token(str(db_tok)) if db_tok else ""
+                                pin = decrypt_token(str(db_pin)) if db_pin else ""
+                                totp_secret = decrypt_token(str(db_totp)) if db_totp else ""
+                    except Exception:
+                        pass
 
             temp_engine.dispose()
         except Exception as exc:

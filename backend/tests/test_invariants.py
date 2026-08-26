@@ -1,7 +1,7 @@
 import pytest
-from app.models import Trade, AtsTradeState
-
-from app.core.state_machine import validate_state_transition
+from app.data.models import Trade, AtsTradeState
+from app.trading.state_machine import validate_state_transition
+from app.trading.cache import get_cache_manager
 
 def test_valid_state_transitions():
     t = Trade(id="t1", ats_state="SIGNAL")
@@ -36,7 +36,6 @@ def test_invalid_state_transition():
     assert validate_state_transition(t, AtsTradeState.OPEN) == False
         
 def test_idempotency_of_cache():
-    from app.core.cache_manager import get_cache_manager
     cache = get_cache_manager()
     cache._trades_by_id.clear()
     

@@ -13,9 +13,9 @@ import logging
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from app.database import SessionLocal
-from app.models import AtsOrder
-from app.core.executor import get_order_executor
+from app.data.database import SessionLocal
+from app.data.models import AtsOrder
+from app.trading.execution import get_order_executor
 
 logging.basicConfig(
     level=logging.INFO,

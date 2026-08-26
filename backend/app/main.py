@@ -1,10 +1,12 @@
 """
-app/main.py — ATS FastAPI Application Entry Point
-==================================================
+app.main
+========
+ATS FastAPI Application Entry Point.
 Production-grade automated trading backend with:
-1. PostgreSQL Database as single source of truth.
-2. Production-safe TradeCacheManager.
-3. Startup & 30s periodic Dhan BrokerReconciler (10/10 Reliability Architecture).
+1. PostgreSQL Database as single source of truth (`app.data`).
+2. Production-safe TradeCacheManager (`app.trading`).
+3. Startup & 30s periodic Dhan BrokerReconciler (`app.workers`).
+4. Dhan Broker and Market Feed integrations (`app.broker`).
 """
 
 import os
@@ -19,17 +21,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Request
 
 import sys
-# Allow running `python main.py` directly from inside the app directory
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config import load_config
-from app.services.dhan_client import get_dhan_client
-from app.services.market_feed import init_market_feed_manager
-from app.core.engine import init_trade_engine
-from app.core.executor import place_market_sell, get_order_executor
-from app.core.reconciler import init_reconciler
-from app.core.broker_reconciler import init_broker_reconciler
-from app.scheduler import start_scheduler, stop_scheduler
+from app.broker.dhan_websocket import init_market_feed_manager
+from app.broker.dhan_client import get_dhan_data_client
+from app.trading.trade_engine import init_trade_engine
+from app.trading.execution import place_market_sell, get_order_executor
+from app.trading.cache import get_cache_manager
+from app.workers.reconciliation import init_broker_reconciler
+from app.workers.scheduler import start_scheduler, stop_scheduler
+from app.data.database import SessionLocal
+from app.data.models import ActiveSubscription
 from app.api.router import router as api_router
 
 LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
@@ -85,12 +88,37 @@ root_logger.handlers = [_file_handler, _console_handler]
 logger = logging.getLogger("ats.main")
 
 
-from app.services.dhan_client import get_dhan_client, get_dhan_data_client
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 0. Safe auto-migration: if dhan_accounts is empty, sync from legacy creds
+    db_init = SessionLocal()
+    try:
+        from app.data.models import DhanAccount, BrokerCredential, User, UserRole, AccountStatus
+        if db_init.query(DhanAccount).count() == 0 and db_init.query(BrokerCredential).count() > 0:
+            admin_u = db_init.query(User).filter(User.email == 'admin').first()
+            if not admin_u:
+                admin_u = User(email='admin', role=UserRole.ADMIN, is_active=True)
+                db_init.add(admin_u)
+                db_init.flush()
+            for c in db_init.query(BrokerCredential).all():
+                is_data = (c.client_id == "1111482994" or c.client_id == os.getenv("DATA_CLIENT_ID", ""))
+                db_init.add(DhanAccount(
+                    user_id=admin_u.id,
+                    client_id=c.client_id,
+                    access_token=c.access_token,
+                    pin=c.pin,
+                    totp_secret=c.totp_secret,
+                    is_data_account=is_data,
+                    account_status=AccountStatus.ACTIVE,
+                ))
+            db_init.commit()
+            logger.info("[STARTUP] Auto-migrated credentials from legacy creds to dhan_accounts.")
+    except Exception as e:
+        logger.warning(f"[STARTUP] Notice checking creds migration: {e}")
+    finally:
+        db_init.close()
+
     cfg = load_config()
-    trade_client = get_dhan_client()
     data_client = get_dhan_data_client()
 
     executor = get_order_executor()
@@ -118,20 +146,15 @@ async def lifespan(app: FastAPI):
     active_ids = set(engine.get_active_security_ids())
     
     # Strictly synchronize the ActiveSubscription DB table with the actual active trades
-    from app.database import SessionLocal
-    from app.models import ActiveSubscription
     db = SessionLocal()
     try:
-        # Get all currently saved subscriptions in DB
         db_subs = db.query(ActiveSubscription).all()
         db_sec_ids = {sub.security_id for sub in db_subs}
         
-        # Remove old/zombie subscriptions from DB that are no longer active
         for old_id in db_sec_ids - active_ids:
             db.query(ActiveSubscription).filter_by(security_id=old_id).delete()
             logger.info(f"[STARTUP] Removed stale/closed stock {old_id} from ActiveSubscription DB.")
             
-        # Add any missing active subscriptions to DB
         for missing_id in active_ids - db_sec_ids:
             db.add(ActiveSubscription(security_id=missing_id))
             
@@ -150,20 +173,11 @@ async def lifespan(app: FastAPI):
 
     logger.info(f"[STARTUP] TradeEngine started — {recovered_count} active trade(s) recovered and broker-reconciled.")
 
-    # 3. Pending order fill reconciler (polls Dhan every 5s for ENTRY_PENDING)
-    reconciler = init_reconciler(
-        confirm_fill_fn=executor.confirm_entry_fill,
-        register_trade_fn=engine.register_trade,
-        subscribe_fn=ws_manager.subscribe,
-    )
-    reconciler_task = asyncio.create_task(reconciler.run())
-
-    # 4. Start 30s Periodic Broker Reconciliation Task
+    # 3. Start 30s Periodic Broker Reconciliation Task
     broker_task = asyncio.create_task(broker_reconciler.run())
 
-    # 5. Cache Consistency Auditor Background Task
+    # 4. Cache Consistency Auditor Background Task
     async def _auditor_loop():
-        from app.core.cache_manager import get_cache_manager
         cache_manager = get_cache_manager()
         while True:
             try:
@@ -173,8 +187,6 @@ async def lifespan(app: FastAPI):
                     logger.info("[CACHE_AUDIT] Synchronizing WebSocket and ActiveSubscription table after repair.")
                     active_ids = set(engine.get_active_security_ids())
                     
-                    from app.database import SessionLocal
-                    from app.models import ActiveSubscription
                     db = SessionLocal()
                     try:
                         db_subs = db.query(ActiveSubscription).all()
@@ -202,24 +214,21 @@ async def lifespan(app: FastAPI):
                 
     auditor_task = asyncio.create_task(_auditor_loop())
 
-    # 6. Tick Health Monitor
+    # 5. Tick Health Monitor
     tick_health_task = asyncio.create_task(engine.tick_health_loop())
 
-    # 7. APScheduler
+    # 6. APScheduler
     start_scheduler()
 
     logger.info("[STARTUP] ATS backend 10/10 architecture online (DB + Cache Recovery + Broker Sync).")
 
     yield
 
-    await reconciler.stop()
     await broker_reconciler.stop()
-    reconciler_task.cancel()
     broker_task.cancel()
     auditor_task.cancel()
     tick_health_task.cancel()
     try:
-        await reconciler_task
         await broker_task
         await auditor_task
         await tick_health_task
@@ -270,21 +279,15 @@ app.include_router(api_router)
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-# Mount the static assets directory from the frontend dist folder
 FRONTEND_DIST = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
 ASSETS_DIR = os.path.join(FRONTEND_DIST, "assets")
 
-# Only mount /assets if the directory exists (to prevent startup errors if not built yet)
 if os.path.isdir(ASSETS_DIR):
     app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
 
 @app.get("/{full_path:path}")
 async def serve_frontend(full_path: str):
-    """
-    Catch-all route for the React SPA. 
-    Serves static files if they exist, otherwise serves index.html for client-side routing.
-    """
-    # Don't intercept API requests if they somehow bypassed the routers
+    """Catch-all route for the React SPA."""
     if full_path.startswith("api/"):
         raise HTTPException(status_code=404, detail="API route not found")
         

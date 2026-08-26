@@ -17,9 +17,9 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from app.database import SessionLocal
-from app.models import Trade, Company, OrderPurpose, AtsTradeState, AtsOrder
-from app.core.executor import place_market_sell
+from app.data.database import SessionLocal
+from app.data.models import Trade, Company, OrderPurpose, AtsTradeState, AtsOrder
+from app.trading.execution import place_market_sell
 
 logging.basicConfig(
     level=logging.INFO,

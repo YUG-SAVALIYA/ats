@@ -15,9 +15,9 @@ from sqlalchemy import text
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from app.database import SessionLocal
-from app.models import Company
-from app.services.weekly_aggregation import aggregate_weekly_candles
+from app.data.database import SessionLocal
+from app.data.models import Company
+from app.data.weekly import aggregate_weekly_candles
 
 logging.basicConfig(
     level=logging.INFO,

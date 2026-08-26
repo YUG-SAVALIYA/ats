@@ -1,11 +1,17 @@
+"""
+app.services.settings
+=====================
+Dynamic Strategy Settings Manager with caching.
+"""
 
 import logging
-from app.database import SessionLocal
-from app.models import StrategySettings, MonthlyRsiSettings
+from app.data.database import SessionLocal
+from app.data.models import StrategySettings, MonthlyRsiSettings
 from functools import lru_cache
 import time
 
 logger = logging.getLogger('ats.settings')
+
 
 class SettingsManager:
     def __init__(self):
@@ -13,7 +19,7 @@ class SettingsManager:
         self._cached_monthly = None
         self._last_fetched_supertrend = 0
         self._last_fetched_monthly = 0
-        self._cache_ttl = 30 # seconds
+        self._cache_ttl = 30  # seconds
 
     def get_settings(self, strategy_type: str = 'SUPERTREND'):
         now = time.time()
@@ -107,6 +113,7 @@ class SettingsManager:
                     'candle_range_max': settings.candle_range_max,
                     'market_cap_min_cr': settings.market_cap_min_cr,
                     'entry_high_breakout_pct': settings.entry_high_breakout_pct,
+                    'min_score': settings.min_score,
                     
                     'initial_sl_pct': settings.initial_sl_pct,
                     'target1_pct': settings.target1_pct,
@@ -132,6 +139,7 @@ class SettingsManager:
                     'candle_range_max': 12.0,
                     'market_cap_min_cr': 8000.0,
                     'entry_high_breakout_pct': 3.0,
+                    'min_score': 65.0,
                     'initial_sl_pct': -5.0,
                     'target1_pct': 17.0,
                     'trade_stages': [
@@ -143,8 +151,14 @@ class SettingsManager:
             finally:
                 db.close()
 
+
 settings_manager = SettingsManager()
+
 
 def get_strategy_settings(strategy_type: str = 'SUPERTREND'):
     return settings_manager.get_settings(strategy_type=strategy_type)
+
+
+def get_monthly_rsi_settings():
+    return settings_manager.get_settings(strategy_type='MONTHLY_RSI')
 

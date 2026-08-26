@@ -25,10 +25,10 @@ from datetime import datetime, date, timedelta
 from typing import List, Dict, Any
 
 from sqlalchemy import func
-from app.database import SessionLocal
-from app.models import Company, DailyCandle
-from app.services.dhan_client import get_dhan_data_client
-from app.services.weekly_aggregation import aggregate_weekly_candles
+from app.data.database import SessionLocal
+from app.data.models import Company, DailyCandle
+from app.broker.dhan_client import get_dhan_data_client
+from app.data.weekly import aggregate_weekly_candles
 
 logging.basicConfig(
     level=logging.INFO,

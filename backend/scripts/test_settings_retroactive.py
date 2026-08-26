@@ -7,8 +7,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from fastapi.testclient import TestClient
 from app.main import app
 from app.api.auth_app import get_current_user
-from app.database import SessionLocal
-from app.models import Trade, AtsTradeState
+from app.data.database import SessionLocal
+from app.data.models import Trade, AtsTradeState
 import uuid
 from datetime import datetime, timezone
 
@@ -47,7 +47,7 @@ def test_retroactive_settings():
     db.commit()
     
     # Pre-warm the engine cache so it's aware of our dummy trade
-    from app.core.engine import get_trade_engine
+    from app.trading.trade_engine import get_trade_engine
     engine = get_trade_engine()
     if engine:
         engine.cache_manager.add_trade(dummy_trade)

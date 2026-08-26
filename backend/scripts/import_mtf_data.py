@@ -15,8 +15,8 @@ import logging
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from app.database import SessionLocal
-from app.models import Company
+from app.data.database import SessionLocal
+from app.data.models import Company
 
 logging.basicConfig(
     level=logging.INFO,

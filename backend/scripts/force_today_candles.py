@@ -7,9 +7,9 @@ from typing import List, Dict, Any
 # Ensure ATS is in Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.database import SessionLocal
-from app.models import Company, DailyCandle
-from app.services.dhan_client import get_dhan_data_client
+from app.data.database import SessionLocal
+from app.data.models import Company, DailyCandle
+from app.broker.dhan_client import get_dhan_data_client
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("force_today")
