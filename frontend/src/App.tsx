@@ -17,6 +17,7 @@ import { api, EngineStatus, StrategySignal } from './services/api';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { CompanyImageProvider } from './context/CompanyImageContext';
 import { StrategyProvider, useStrategy } from './context/StrategyContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { Header } from './components/Header';
 import { MetricCards } from './components/MetricCards';
 import { SignalsTable } from './components/SignalsTable';
@@ -24,6 +25,7 @@ import { PositionsTable } from './components/PositionsTable';
 import { HoldingsTable } from './components/HoldingsTable';
 import { OrderBookTable } from './components/OrderBookTable';
 import { LockScreen } from './pages/LockScreen';
+import { DhanConnectScreen } from './pages/DhanConnectScreen';
 import { Settings } from './pages/Settings';
 import { Layers, FileText, History, Database } from 'lucide-react';
 
@@ -347,17 +349,48 @@ function AppContent() {
 }
 
 
+function AppRouter() {
+  const { appState } = useAuth();
+
+  // ── Loading spinner while we verify the stored JWT ──────────────────────────
+  if (appState === 'AUTH_UNKNOWN') {
+    return (
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center space-y-4 font-['Outfit']">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500"></div>
+        <p className="text-xs font-mono text-zinc-500 tracking-wider uppercase">Authenticating Secure ATS Session...</p>
+      </div>
+    );
+  }
+
+  // ── Gate 1: ATS authentication ───────────────────────────────────────────────
+  if (appState === 'UNAUTHENTICATED') {
+    return <LockScreen />;
+  }
+
+  // ── Gate 2: Dhan account connection ─────────────────────────────────────────
+  // DHAN_NOT_CONNECTED, DHAN_CONNECTING, DHAN_AUTH_REQUIRED all show the Dhan screen.
+  // Dashboard (AppContent) is NEVER mounted until appState === 'DHAN_CONNECTED'.
+  if (appState !== 'DHAN_CONNECTED') {
+    return <DhanConnectScreen />;
+  }
+
+  // ── Gate 3: Dashboard — only reached after both gates pass ──────────────────
+  return (
+    <CompanyImageProvider>
+      <AppContent />
+    </CompanyImageProvider>
+  );
+}
+
+
 export default function App() {
   return (
-    <StrategyProvider>
-      <CompanyImageProvider>
+    <AuthProvider>
+      <StrategyProvider>
         <ToastProvider>
-          <Routes>
-            <Route path="/lock" element={<LockScreen />} />
-            <Route path="/*" element={<AppContent />} />
-          </Routes>
+          <AppRouter />
         </ToastProvider>
-      </CompanyImageProvider>
-    </StrategyProvider>
+      </StrategyProvider>
+    </AuthProvider>
   );
 }

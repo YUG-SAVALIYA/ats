@@ -194,6 +194,13 @@ export function Settings({ isLight }: SettingsProps) {
                       <input type="number" step="0.1" name="entry_high_breakout_pct" value={settings.entry_high_breakout_pct || ''} onChange={handleChange} className={inputClass} />
                     </div>
                   </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className={labelClass}>Min Score (0-100)</label>
+                      <input type="number" name="min_score" value={settings.min_score || ''} onChange={handleChange} className={inputClass} />
+                    </div>
+                  </div>
                 </div>
               </div>
 

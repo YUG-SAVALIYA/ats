@@ -127,6 +127,8 @@ export const SignalsTable: React.FC<SignalsTableProps> = ({ signals = [], isLigh
                   <th className="px-4 py-3">Signal ID</th>
                   <th className="px-3 py-3">Symbol</th>
                   <th className="px-3 py-3">Strategy</th>
+                  <th className="px-3 py-3 text-right">Score</th>
+                  <th className="px-3 py-3 text-right">RSI</th>
                   <th className="px-3 py-3 text-right">Entry (High)</th>
                   <th className="px-3 py-3 text-right">Target Price</th>
                   <th className="px-3 py-3 text-right">Stop Loss</th>
@@ -173,6 +175,8 @@ export const SignalsTable: React.FC<SignalsTableProps> = ({ signals = [], isLigh
                         {symbol}
                       </td>
                       <td className={`px-3 py-3 font-sans ${isLight ? 'text-slate-600' : 'text-zinc-400'}`}>{strategyName}</td>
+                      <td className={`px-3 py-3 text-right font-bold ${sig.score && sig.score >= 80 ? 'text-emerald-500' : isLight ? 'text-slate-900' : 'text-white'}`}>{sig.score ?? '-'}</td>
+                      <td className={`px-3 py-3 text-right font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>{sig.daily_rsi ? sig.daily_rsi.toFixed(1) : '-'}</td>
                       <td className={`px-3 py-3 text-right font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>{fmt(entryHigh)}</td>
                       <td className="px-3 py-3 text-right text-emerald-500 font-bold">{fmt(targetPrice)}</td>
                       <td className="px-3 py-3 text-right text-rose-500 font-bold">{fmt(stopLoss)}</td>

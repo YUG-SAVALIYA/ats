@@ -1,9 +1,11 @@
 import React from 'react';
 import { AuthStatus } from '../types';
-import { ShieldCheck, RefreshCw, Zap, LayoutDashboard, Activity, TrendingUp, Sun, Moon } from 'lucide-react';
+import { ShieldCheck, RefreshCw, Zap, LayoutDashboard, Activity, TrendingUp, Sun, Moon, LogOut, Wifi, WifiOff } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { Settings as SettingsIcon } from 'lucide-react';
 import { useStrategy } from '../context/StrategyContext';
+import { useAuth } from '../context/AuthContext';
+import { api } from '../services/api';
 
 interface HeaderProps {
   authStatus: AuthStatus | null;
@@ -28,6 +30,17 @@ export const Header: React.FC<HeaderProps> = ({
   const location = useLocation();
   const currentPath = location.pathname;
   const { activeStrategy, setActiveStrategy } = useStrategy();
+  const { logout, onDhanDisconnected } = useAuth();
+
+  const handleDhanDisconnect = async () => {
+    if (!window.confirm('Disconnect your Dhan account? The Dashboard will be locked until you reconnect.')) return;
+    try {
+      await api.disconnectDhan();
+      onDhanDisconnected();
+    } catch (e: any) {
+      alert(`Disconnect failed: ${e.message || e}`);
+    }
+  };
 
   return (
     <header className={`sticky top-0 z-40 border-b transition-colors duration-300 ${
@@ -165,6 +178,52 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
 
+          {/* Dhan Connection Status */}
+          <div
+            className={`hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs cursor-pointer group relative ${
+              isLight
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                : 'bg-emerald-950/40 border-emerald-900/60 text-emerald-400'
+            }`}
+            title="Dhan Connected — click to disconnect"
+          >
+            <Wifi className="h-3.5 w-3.5" />
+            <span className="font-semibold">Dhan</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            {/* Hover: show disconnect option */}
+            <button
+              onClick={handleDhanDisconnect}
+              className="absolute inset-0 flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 rounded-lg bg-rose-950/80 text-rose-400 text-[10px] font-bold transition-opacity duration-150"
+            >
+              <WifiOff size={12} /> Disconnect
+            </button>
+          </div>
+
+          {/* Emergency Kill Switch Button */}
+          <button
+            onClick={async () => {
+              try {
+                const cur = await api.getKillSwitchStatus();
+                const nextState = !cur.kill_switch_active;
+                const prompt = nextState
+                  ? 'ARE YOU SURE? This will immediately BLOCK all automated and manual entry orders!'
+                  : 'Resume normal automated trading?';
+                if (window.confirm(prompt)) {
+                  await api.toggleKillSwitch(nextState);
+                  alert(`Kill Switch is now ${nextState ? 'ACTIVE' : 'DISABLED'}`);
+                  onRefresh();
+                }
+              } catch (e: any) {
+                alert(`Kill switch error: ${e.message || e}`);
+              }
+            }}
+            title="Emergency Kill Switch (Halts all new entries immediately)"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-800 transition-all hover:scale-105"
+          >
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
+            <span>Kill Switch</span>
+          </button>
+
           {/* Theme Toggle Button (Sun / Moon) */}
           <button
             onClick={onToggleTheme}
@@ -176,6 +235,23 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
           >
             {isLight ? <Moon className="h-4 w-4 text-slate-700" /> : <Sun className="h-4 w-4 text-amber-400" />}
+          </button>
+
+          {/* Logout / Lock Screen Button */}
+          <button
+            onClick={() => {
+              if (window.confirm('Lock session and log out?')) {
+                logout();
+              }
+            }}
+            title="Lock Session / Logout"
+            className={`p-2 rounded-xl border transition-all hover:scale-105 ${
+              isLight
+                ? 'bg-slate-100 hover:bg-rose-100 border-slate-300 text-slate-700 hover:text-rose-700 hover:border-rose-300'
+                : 'bg-zinc-900 hover:bg-rose-950/40 border-zinc-800 text-zinc-400 hover:text-rose-400 hover:border-rose-900/50'
+            }`}
+          >
+            <LogOut className="h-4 w-4" />
           </button>
 
           {/* Sync Account Button */}

@@ -14,7 +14,13 @@ import {
 const env = (import.meta as any).env;
 export const API_BASE = env.VITE_BACKEND_URL ? `${env.VITE_BACKEND_URL}/api` : '/api';
 
-async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+let unauthorizedHandler: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: () => void) {
+  unauthorizedHandler = handler;
+}
+
+export async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const token = localStorage.getItem('ats_admin_token');
   const res = await fetch(`${API_BASE}${url}`, {
     headers: {
@@ -27,7 +33,9 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 
   if (res.status === 401 || res.status === 403) {
     localStorage.removeItem('ats_admin_token');
-    window.location.href = '/lock';
+    if (unauthorizedHandler) {
+      unauthorizedHandler();
+    }
     throw new Error('Unauthorized');
   }
 
@@ -62,6 +70,15 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   return data as T;
 }
 
+export interface UserProfile {
+  authenticated: boolean;
+  sub: string;
+  user_id: string | null;
+  role: string;
+  is_admin: boolean;
+  account_ids: string[] | null;
+}
+
 export interface EngineStatus {
   enabled: boolean;
   mode: string;
@@ -91,6 +108,7 @@ export interface StrategySignal {
   candle_range?: number;
   supertrend_flip?: boolean;
   market_cap_cr?: number;
+  score?: number;
   target_price?: number;
   stop_loss?: number;
   quantity?: number;
@@ -116,6 +134,7 @@ export interface StrategySettings {
   candle_range_max: number;
   market_cap_min_cr: number;
   entry_high_breakout_pct: number;
+  min_score: number;
   initial_sl_pct: number;
   target1_pct: number;
   capital_allocation_pct: number;
@@ -152,6 +171,41 @@ export interface MonthlyRsiSettings {
 }
 
 export const api = {
+  // Application Authentication (Gate)
+  getAppAuthStatus: () => fetchJson<{ is_setup: boolean }>('/app-auth/status'),
+  setupAppPassword: (password: string) =>
+    fetchJson<{ message: string }>('/app-auth/setup', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    }),
+  loginApp: (password: string, email?: string) =>
+    fetchJson<{ access_token: string; token_type: string }>('/app-auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ password, ...(email ? { email } : {}) }),
+    }),
+  getMe: () => fetchJson<UserProfile>('/app-auth/me'),
+
+  // Dhan Connection Gate
+  getDhanConnection: () => fetchJson<{
+    status: string;
+    client_id_masked: string | null;
+    account_id: string | null;
+    account_status: string | null;
+    token_present: boolean;
+    connected_at: string | null;
+    partner_flow_available: boolean;
+  }>('/dhan/connection'),
+  getDhanConnectUrl: () => fetchJson<{ consent_url: string; partner_id: string; redirect_uri: string }>('/dhan/connect-url'),
+  connectDhan: (client_id: string, access_token: string) =>
+    fetchJson<{ status: string; client_id_masked: string; account_id: string; message: string }>('/dhan/connect', {
+      method: 'POST',
+      body: JSON.stringify({ client_id, access_token }),
+    }),
+  disconnectDhan: () =>
+    fetchJson<{ status: string; message: string }>('/dhan/disconnect', { method: 'POST' }),
+  verifyDhanToken: () =>
+    fetchJson<{ status: string }>('/dhan/verify', { method: 'POST' }),
+
   // Automated Engine
   getEngineStatus: () => fetchJson<EngineStatus>('/engine/status'),
   toggleEngine: (enabled: boolean) =>
@@ -161,7 +215,7 @@ export const api = {
     }),
   getSignals: (strategy?: string) => fetchJson<StrategySignal[]>(`/signals${strategy ? `?strategy_type=${strategy}` : ''}`),
 
-  // Auth
+  // Broker Auth (Dhan)
   getAuthStatus: () => fetchJson<AuthStatus>('/auth/status'),
   renewToken: (totp?: string) =>
     fetchJson<{ status: string; message: string }>('/auth/renew', {
@@ -216,4 +270,34 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ security_id: securityId, quantity }),
   }),
+
+  // Observability & Kill Switch
+  getObservabilityHealth: () => fetchJson<{
+    status: string;
+    timestamp: string;
+    kill_switch_active: boolean;
+    database: { status: string; latency_ms: number };
+    websocket: { status: string; subscribed_symbols_count: number; last_tick_time: string | null };
+    scheduler: { running: boolean; jobs_count: number; jobs: any[] };
+    broker: { active_accounts: number };
+    trading_engine: { active_cached_trades: number };
+  }>('/observability/health'),
+
+  getKillSwitchStatus: () => fetchJson<{ kill_switch_active: boolean; status: string }>('/engine/kill-switch'),
+
+  toggleKillSwitch: (enabled: boolean) => fetchJson<{ status: string; kill_switch_active: boolean; message: string }>('/engine/kill-switch', {
+    method: 'POST',
+    body: JSON.stringify({ enabled }),
+  }),
+
+  getAuditTraceHistory: (tradeId?: string) => fetchJson<Array<{
+    id: string;
+    dhan_account_id: string | null;
+    trade_id: string | null;
+    event_type: string;
+    detail: string;
+    price: number | null;
+    quantity: number | null;
+    created_at: string;
+  }>>(`/observability/audit${tradeId ? `?trade_id=${tradeId}` : ''}`),
 };

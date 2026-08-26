@@ -79,6 +79,10 @@ export const SignalDetailsModal: React.FC<SignalDetailsModalProps> = ({ signal, 
             <h3 className={`text-xs font-bold mb-3 uppercase tracking-wider ${isLight ? 'text-slate-700' : 'text-zinc-400'}`}>Strategy Conditions</h3>
             <div className="grid grid-cols-2 gap-3 font-mono text-sm">
               <div className={`p-3 rounded-xl border ${isLight ? 'bg-slate-50 border-slate-200' : 'bg-zinc-900/50 border-zinc-800'}`}>
+                <p className={`text-[10px] mb-1 font-sans font-semibold ${isLight ? 'text-slate-500' : 'text-zinc-400'}`}>Score</p>
+                <p className={`font-bold ${signal.score && signal.score >= 80 ? 'text-emerald-500' : ''}`}>{signal.score ?? 'N/A'}</p>
+              </div>
+              <div className={`p-3 rounded-xl border ${isLight ? 'bg-slate-50 border-slate-200' : 'bg-zinc-900/50 border-zinc-800'}`}>
                 <p className={`text-[10px] mb-1 font-sans font-semibold ${isLight ? 'text-slate-500' : 'text-zinc-400'}`}>Daily RSI</p>
                 <p className="font-bold">{signal.daily_rsi ? signal.daily_rsi.toFixed(2) : 'N/A'}</p>
               </div>

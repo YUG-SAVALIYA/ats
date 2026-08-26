@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Lock, Unlock, KeyRound, ShieldCheck } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
-import { API_BASE } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+import { api } from '../services/api';
 
 export function LockScreen() {
   const [isSetupMode, setIsSetupMode] = useState<boolean | null>(null);
@@ -9,18 +10,16 @@ export function LockScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const { addToast } = useToast();
+  const { login } = useAuth();
 
   useEffect(() => {
     // Check if password is set up
-    fetch(`${API_BASE}/app-auth/status`)
-      .then(res => {
-        if (!res.ok) throw new Error('Backend offline');
-        return res.json();
-      })
+    api.getAppAuthStatus()
       .then(data => {
         setIsSetupMode(!data.is_setup);
       })
       .catch(err => {
+        console.error('Backend status check failed:', err);
         addToast('Failed to connect to backend', 'error');
         // Stop spinning if it fails
         setIsSetupMode(true); 
@@ -46,40 +45,18 @@ export function LockScreen() {
 
     try {
       if (isSetupMode) {
-        const res = await fetch(`${API_BASE}/app-auth/setup`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password })
-        });
-        
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.detail || 'Failed to setup password');
-        }
-        
+        await api.setupAppPassword(password);
         addToast('Password set successfully. Please login.', 'success');
         setIsSetupMode(false);
         setPassword('');
         setConfirmPassword('');
       } else {
-        const res = await fetch(`${API_BASE}/app-auth/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password })
-        });
-        
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.detail || 'Invalid password');
-        }
-        
-        const data = await res.json();
-        localStorage.setItem('ats_admin_token', data.access_token);
+        const data = await api.loginApp(password);
+        await login(data.access_token);
         addToast('Unlocked successfully', 'success');
-        window.location.href = '/';
       }
     } catch (err: any) {
-      addToast(err.message, 'error');
+      addToast(err.message || 'Authentication failed', 'error');
     } finally {
       setLoading(false);
     }
