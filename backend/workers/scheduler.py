@@ -610,7 +610,7 @@ def start_scheduler():
     
     scheduler.add_job(
         scheduled_post_market_candle_sync,
-        trigger=CronTrigger(day_of_week="mon-fri", hour=15, minute=46, timezone=IST),
+        trigger=CronTrigger(day_of_week="mon-fri", hour=15, minute=50, timezone=IST),
         id="sync_candles_1546",
         name="Post-Market Candle Sync at 3:46 PM",
         replace_existing=True
@@ -618,7 +618,7 @@ def start_scheduler():
     
     scheduler.add_job(
         scheduled_post_market_signal_scan,
-        trigger=CronTrigger(day_of_week="mon-fri", hour=18, minute=9, timezone=IST),
+        trigger=CronTrigger(day_of_week="mon-fri", hour=17, minute=0, timezone=IST),
         id="scan_signals_1700",
         name="Post-Market Signal Scan at 5:00 PM",
         replace_existing=True

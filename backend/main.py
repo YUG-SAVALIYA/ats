@@ -16,10 +16,11 @@ from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.exceptions import RequestValidationError
 
 # Ensure backend root is in sys.path
 backend_dir = Path(__file__).resolve().parent
@@ -198,10 +199,6 @@ app.include_router(signals_router)
 app.include_router(trades_router)
 app.include_router(portfolio_router)
 app.include_router(settings_router)
-
-
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
