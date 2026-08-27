@@ -16,6 +16,8 @@ export const API_BASE = env.VITE_BACKEND_URL ? `${env.VITE_BACKEND_URL}/api` : '
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const token = localStorage.getItem('ats_admin_token');
+  const isAuthEndpoint = url.startsWith('/app-auth/');
+  
   const res = await fetch(`${API_BASE}${url}`, {
     headers: {
       'Content-Type': 'application/json',
@@ -25,10 +27,12 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
     ...options,
   });
 
-  if (res.status === 401 || res.status === 403) {
+  if ((res.status === 401 || res.status === 403) && !isAuthEndpoint) {
     localStorage.removeItem('ats_admin_token');
     window.location.href = '/lock';
-    throw new Error('Unauthorized');
+    const authErr = new Error('Authentication required or session expired');
+    (authErr as any).status = res.status;
+    throw authErr;
   }
 
   let data: any;
@@ -36,26 +40,37 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
     data = await res.json();
   } catch (_) {
     if (!res.ok) {
-      throw new Error(`HTTP ${res.status}: Failed to parse response from server`);
+      const err = new Error(`HTTP ${res.status}: Server returned non-JSON error response`);
+      (err as any).status = res.status;
+      throw err;
     }
     return {} as T;
   }
 
   if (!res.ok) {
-    let errMessage = `HTTP ${res.status}`;
+    let errMessage = `HTTP ${res.status}: ${res.statusText || 'Request Failed'}`;
     if (data && data.detail) {
       errMessage = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
     } else if (data && data.remarks) {
-      errMessage = data.remarks;
+      errMessage = typeof data.remarks === 'string' ? data.remarks : JSON.stringify(data.remarks);
     } else if (data && data.message) {
       errMessage = data.message;
+    } else if (data && data.error) {
+      errMessage = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
     }
-    throw new Error(errMessage);
+    const err = new Error(errMessage);
+    (err as any).status = res.status;
+    (err as any).data = data;
+    throw err;
   }
 
   if (data && typeof data === 'object' && !Array.isArray(data)) {
     if (data.status === 'failure' || data.status === 'error') {
-      throw new Error(data.remarks || data.message || 'API operation failed');
+      const errDetail = data.detail || data.remarks || data.message || data.error || 'API operation failed';
+      const err = new Error(typeof errDetail === 'string' ? errDetail : JSON.stringify(errDetail));
+      (err as any).status = data.status_code || 400;
+      (err as any).data = data;
+      throw err;
     }
   }
 
@@ -97,6 +112,7 @@ export interface StrategySignal {
   status: string;
   strategy?: string;
   rejection_reason?: string;
+  evaluation?: any;
   executed_price?: number;
   new_target_pct?: number;
   new_sl_pct?: number;

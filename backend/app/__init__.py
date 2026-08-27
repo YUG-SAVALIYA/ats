@@ -1,3 +1,0 @@
-"""
-ATS Backend Application Package
-"""
