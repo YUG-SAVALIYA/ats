@@ -22,8 +22,10 @@ export const SignalDetailsModal: React.FC<SignalDetailsModalProps> = ({ signal, 
   const isRejected = ['REJECTED', 'CANCELLED', 'FAILED'].includes((signal.status || '').toUpperCase());
 
   const entryHigh = signal.signal_high || signal.ref_price || 0;
-  const targetPrice = signal.target_price ?? (entryHigh ? entryHigh * 1.17 : 0);
-  const stopLoss = signal.stop_loss ?? (entryHigh ? entryHigh * 0.95 : 0);
+  const targetPct = signal.target_pct ?? signal.new_target_pct ?? 20;
+  const slPct = signal.sl_pct ?? signal.new_sl_pct ?? 3;
+  const targetPrice = signal.target_price ?? (entryHigh ? entryHigh * (1 + targetPct / 100) : 0);
+  const stopLoss = signal.stop_loss ?? (entryHigh ? entryHigh * (1 - slPct / 100) : 0);
   
   const evalData = signal.evaluation || {};
   const hasEval = Object.keys(evalData).length > 0;
@@ -34,11 +36,11 @@ export const SignalDetailsModal: React.FC<SignalDetailsModalProps> = ({ signal, 
   // Calculate executed stop loss / target if available
   const executedTarget = signal.executed_price && signal.new_target_pct 
     ? signal.executed_price * (1 + signal.new_target_pct / 100) 
-    : null;
+    : targetPrice;
     
   const executedSL = signal.executed_price && signal.new_sl_pct 
     ? signal.executed_price * (1 - signal.new_sl_pct / 100) 
-    : null;
+    : stopLoss;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={onClose}>
@@ -191,11 +193,11 @@ export const SignalDetailsModal: React.FC<SignalDetailsModalProps> = ({ signal, 
                 <p className={`font-mono font-bold text-base ${isLight ? 'text-slate-900' : 'text-white'}`}>{fmt(entryHigh)}</p>
               </div>
               <div className="text-center">
-                <p className={`text-xs mb-1 font-semibold ${isLight ? 'text-slate-500' : 'text-zinc-400'}`}>Target (+17%)</p>
+                <p className={`text-xs mb-1 font-semibold ${isLight ? 'text-slate-500' : 'text-zinc-400'}`}>Target (+{targetPct}%)</p>
                 <p className="font-mono font-bold text-base text-emerald-400">{fmt(targetPrice)}</p>
               </div>
               <div className="text-right">
-                <p className={`text-xs mb-1 font-semibold ${isLight ? 'text-slate-500' : 'text-zinc-400'}`}>Stop Loss (-5%)</p>
+                <p className={`text-xs mb-1 font-semibold ${isLight ? 'text-slate-500' : 'text-zinc-400'}`}>Stop Loss (-{slPct}%)</p>
                 <p className="font-mono font-bold text-base text-rose-400">{fmt(stopLoss)}</p>
               </div>
             </div>

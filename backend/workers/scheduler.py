@@ -502,15 +502,18 @@ def scheduled_post_market_candle_sync():
 
 
 def scheduled_post_market_signal_scan():
-    """Runs post-market signal scanning at 5:00 PM."""
+    """Runs post-market signal scanning at 7:00 PM (syncing fresh daily candles first)."""
     now = datetime.now()
     if not is_trading_day(now.date()):
         logger.info(f"[SCHEDULER] Skipping signal scan because {now.date()} is not a trading day.")
         return
 
-    logger.info("[SCHEDULER] Triggering post-market signal scan at 5:00 PM...")
+    logger.info("[SCHEDULER] Triggering post-market candle sync and signal scan at 7:00 PM...")
     try:
-        new_signals = scan_signals_from_db()
+        # 1. Sync fresh daily candles from Dhan for eligible universe
+        sync_all_active_companies(limit=1000)
+        # 2. Run signal scan for today's market close
+        new_signals = scan_signals_from_db(target_date=now.date())
         logger.info(f"[SCHEDULER] Post-market signal scan completed: {len(new_signals)} new signals found.")
     except Exception as exc:
         logger.error(f"[SCHEDULER] Post-market signal scan failed: {exc}")
@@ -610,7 +613,7 @@ def start_scheduler():
     
     scheduler.add_job(
         scheduled_post_market_candle_sync,
-        trigger=CronTrigger(day_of_week="mon-fri", hour=15, minute=50, timezone=IST),
+        trigger=CronTrigger(day_of_week="mon-fri", hour=15, minute=46, timezone=IST),
         id="sync_candles_1546",
         name="Post-Market Candle Sync at 3:46 PM",
         replace_existing=True
@@ -618,9 +621,9 @@ def start_scheduler():
     
     scheduler.add_job(
         scheduled_post_market_signal_scan,
-        trigger=CronTrigger(day_of_week="mon-fri", hour=17, minute=0, timezone=IST),
+        trigger=CronTrigger(day_of_week="mon-fri", hour=19, minute=0, timezone=IST),
         id="scan_signals_1700",
-        name="Post-Market Signal Scan at 5:00 PM",
+        name="Post-Market Signal Scan at 7:00 PM",
         replace_existing=True
     )
     

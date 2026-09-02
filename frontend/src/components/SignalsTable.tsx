@@ -142,10 +142,12 @@ export const SignalsTable: React.FC<SignalsTableProps> = ({ signals = [], isLigh
                   const rejected = isRejected(statusStr);
 
                   const symbol = sig.trading_symbol || sig.symbol || 'UNKNOWN';
-                  const strategyName = sig.strategy || '3:25 PM Breakout';
+                  const strategyName = sig.strategy_type || sig.strategy || 'SUPERTREND';
                   const entryHigh = sig.signal_high || sig.ref_price || 0;
-                  const targetPrice = sig.target_price ?? (entryHigh ? entryHigh * 1.17 : 0);
-                  const stopLoss = sig.stop_loss ?? (entryHigh ? entryHigh * 0.95 : 0);
+                  const targetPct = sig.target_pct ?? sig.new_target_pct ?? 20;
+                  const slPct = sig.sl_pct ?? sig.new_sl_pct ?? 3;
+                  const targetPrice = sig.target_price ?? (entryHigh ? entryHigh * (1 + targetPct / 100) : 0);
+                  const stopLoss = sig.stop_loss ?? (entryHigh ? entryHigh * (1 - slPct / 100) : 0);
                   const qty = sig.quantity ?? '-';
 
                   return (

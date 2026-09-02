@@ -18,17 +18,28 @@ load_dotenv(env_file)
 
 class Config:
     def __init__(self):
-        # Database
-        self.database_url = os.getenv("DATABASE_URL", "").strip()
+        # Database Components
+        self.db_host = (os.getenv("DB_HOST"))
+        self.db_port = int(os.getenv("DB_PORT"))
+        self.db_user = (os.getenv("POSTGRES_USER"))
+        self.db_password = (os.getenv("POSTGRES_PASSWORD"))
+        self.db_name = (os.getenv("POSTGRES_DB"))
+
+        # Primary Database URL
+        raw_db_url = (os.getenv("DATABASE_URL"))
+        if raw_db_url:
+            self.database_url = raw_db_url
+        else:
+            self.database_url = f"postgresql://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
 
         # Security & Cryptography Keys
-        self.token_encryption_key = os.getenv("TOKEN_ENCRYPTION_KEY").strip()
-        self.jwt_secret_key = os.getenv("JWT_SECRET_KEY").strip()
+        self.token_encryption_key = (os.getenv("TOKEN_ENCRYPTION_KEY") or "").strip(' "\'')
+        self.jwt_secret_key = (os.getenv("JWT_SECRET_KEY"))
 
         # Server & Networking
         self.port = int(os.getenv("PORT"))
-        self.host = os.getenv("HOST").strip()
-        self.frontend_url = os.getenv("FRONTEND_URL").strip()
+        self.host = (os.getenv("HOST"))
+        self.frontend_url = (os.getenv("FRONTEND_URL"))
 
         # Trade / Order Execution Account
         self.client_id = ""

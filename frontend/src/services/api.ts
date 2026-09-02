@@ -9,10 +9,11 @@ import {
   StockMasterItem,
 } from '../types';
 
-// If VITE_BACKEND_URL is provided in .env, it will use that explicit domain/port.
-// Otherwise, it intelligently falls back to relative '/api' for unified hosting.
+// In local development (npm run dev), route via Vite's proxy '/api' to local backend.
+// In production builds (npm run build), route directly to VITE_BACKEND_URL or relative '/api'.
 const env = (import.meta as any).env;
-export const API_BASE = env.VITE_BACKEND_URL ? `${env.VITE_BACKEND_URL}/api` : '/api';
+const rawBackendUrl = (!env.DEV && env.VITE_BACKEND_URL ? env.VITE_BACKEND_URL : '').trim().replace(/\/+$/, '');
+export const API_BASE = rawBackendUrl ? `${rawBackendUrl}/api` : '/api';
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const token = localStorage.getItem('ats_admin_token');
@@ -106,11 +107,14 @@ export interface StrategySignal {
   candle_range?: number;
   supertrend_flip?: boolean;
   market_cap_cr?: number;
+  target_pct?: number;
+  sl_pct?: number;
   target_price?: number;
   stop_loss?: number;
   quantity?: number;
   status: string;
   strategy?: string;
+  strategy_type?: string;
   rejection_reason?: string;
   evaluation?: any;
   executed_price?: number;

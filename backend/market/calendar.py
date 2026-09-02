@@ -9,8 +9,10 @@ from __future__ import annotations
 import uuid
 import logging
 from datetime import date, datetime
-from typing import Set, Optional
-import holidays
+try:
+    import holidays
+except ImportError:
+    holidays = None
 
 from database.database import SessionLocal
 from database.models import MarketHoliday
@@ -56,6 +58,9 @@ def fetch_and_store_holidays(year: int) -> int:
     """Fetches Indian Financial Market holidays and upserts them into `market_holidays`."""
     global _cache_populated
     logger.info(f"[CALENDAR] Fetching financial holidays for India for the year {year}...")
+    if not holidays:
+        logger.warning("[CALENDAR] 'holidays' library not installed. Skipping automatic holiday fetch.")
+        return 0
     try:
         in_holidays = holidays.financial_holidays("IN", years=year)
     except Exception as e:

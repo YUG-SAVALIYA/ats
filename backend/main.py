@@ -27,13 +27,20 @@ backend_dir = Path(__file__).resolve().parent
 if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# ===============================================================================
 # DAILY ROTATING FILE LOGGER
-# ═══════════════════════════════════════════════════════════════════════════════
+# ===============================================================================
 
 LOG_DIR = backend_dir / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 LOG_FILE = LOG_DIR / "ats.log"
+
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 file_handler = TimedRotatingFileHandler(
     filename=str(LOG_FILE),
@@ -51,14 +58,15 @@ stream_handler.setFormatter(file_formatter)
 
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.INFO)
+root_logger.handlers.clear()
 root_logger.addHandler(file_handler)
 root_logger.addHandler(stream_handler)
 
 logger = logging.getLogger("ats.main")
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# ===============================================================================
 # ATS IMPORTS
-# ═══════════════════════════════════════════════════════════════════════════════
+# ===============================================================================
 
 from config import load_config
 from database.database import init_database
@@ -79,9 +87,9 @@ from api.portfolio import router as portfolio_router
 from api.settings import router as settings_router
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# ===============================================================================
 # APPLICATION LIFESPAN
-# ═══════════════════════════════════════════════════════════════════════════════
+# ===============================================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -175,13 +183,32 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS
+# CORS Configuration — Production Domains & Localhost Support
+ALLOWED_ORIGINS = [
+    # production
+    "https://trading.aistocksagent.com",
+    "https://trading-b.aistocksagent.com",
+    "http://trading.aistocksagent.com",
+    "http://trading-b.aistocksagent.com",
+
+    # local development
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://localhost:3010",
+    "http://localhost:8003",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3010",
+    "http://127.0.0.1:8003",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 
@@ -270,14 +297,26 @@ if assets_path.exists() and assets_path.is_dir():
 
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str):
-    """Serves the React frontend single-page application."""
+    """Serves the React frontend single-page application and static assets from frontend/dist."""
     if full_path.startswith("api/"):
         raise HTTPException(
             status_code=404,
             detail=f"API endpoint '/{full_path}' not found"
         )
 
+    file_path = frontend_dist / full_path
+    if full_path and file_path.exists() and file_path.is_file():
+        return FileResponse(file_path)
+
     index_html = frontend_dist / "index.html"
     if index_html.exists():
         return FileResponse(index_html)
     return {"message": "ATS API is running. Build the frontend to view the UI."}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    cfg = load_config()
+    logger.info(f"Starting ATS Server on {cfg.host}:{cfg.port} ...")
+    uvicorn.run("main:app", host=cfg.host, port=cfg.port, reload=False)
+

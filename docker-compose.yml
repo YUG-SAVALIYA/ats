@@ -1,0 +1,61 @@
+version: "3.8"
+
+services:
+  # ── ATS Backend Service (API, WebSocket & Execution Engine) ───────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ats_backend_prod
+    restart: always
+    ports:
+      - "8003:8003"
+    env_file:
+      - ./backend/.env
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8003
+      - FRONTEND_URL=https://trading.aistocksagent.com
+      - TZ=Asia/Kolkata
+    volumes:
+      - ./backend/logs:/app/logs
+    networks:
+      - ats_prod_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/api/app-auth/status"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── ATS Frontend Service (High-Performance Nginx Web Server) ─────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_BACKEND_URL: https://trading-b.aistocksagent.com
+    container_name: ats_frontend_prod
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - ats_prod_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+networks:
+  ats_prod_network:
+    name: ats_prod_network
+    driver: bridge

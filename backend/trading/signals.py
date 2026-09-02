@@ -7,6 +7,7 @@ manages signal persistence in DB, and evaluates 3:25 PM qualification.
 
 from __future__ import annotations
 
+import uuid
 import logging
 from datetime import datetime, date, timedelta
 from collections import defaultdict
@@ -15,7 +16,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy import text
 
 from database.database import SessionLocal
-from database.models import Company, Signal, Trade
+from database.models import Company, Signal, Trade, StrategySettings
 from market.candles import (
     get_daily_candles_from_db,
     get_weekly_candles_from_db,
@@ -49,7 +50,6 @@ def save_signal_to_db(company_id: str, signal_dict: Dict[str, Any], strategy_typ
         existing = db.query(Signal).filter(
             Signal.company_id == company_id,
             Signal.date == sig_date,
-            Signal.status == "PENDING",
             Signal.strategy_type == strategy_type
         ).first()
 
@@ -103,9 +103,13 @@ def get_signals_from_db(
     strategy_type: Optional[str] = None,
     limit: int = 100
 ) -> List[Dict[str, Any]]:
-    """Fetches signals from DB joined with companies and trades."""
+    """Fetches signals from DB joined with companies and trades, enriched with active strategy target/SL settings."""
     db = SessionLocal()
     try:
+        settings = db.query(StrategySettings).first()
+        cfg_target_pct = float(settings.target1_pct) if settings and settings.target1_pct is not None else 20.0
+        cfg_sl_pct = abs(float(settings.initial_sl_pct)) if settings and settings.initial_sl_pct is not None else 3.0
+
         query = (
             db.query(Signal, Company, Trade)
             .join(Company, Signal.company_id == Company.id)
@@ -125,12 +129,26 @@ def get_signals_from_db(
                 continue
             seen_signal_ids.add(sig.id)
             raw = sig.raw_signal_data or {}
+
+            sig_high = float(raw.get("signal_high") or raw.get("ref_price") or 0.0)
+            trade_target_pct = getattr(trade, "target_pct", None) if trade else None
+            trade_sl_pct = getattr(trade, "stoploss_pct", None) if trade else None
+            trade_target_price = getattr(trade, "target1_price", None) if trade else None
+            trade_stop_price = getattr(trade, "stop_price", None) if trade else None
+
+            sig_target_pct = float(trade_target_pct) if trade_target_pct is not None else cfg_target_pct
+            sig_sl_pct = abs(float(trade_sl_pct)) if trade_sl_pct is not None else cfg_sl_pct
+
+            calc_target_price = round(sig_high * (1 + sig_target_pct / 100.0), 2) if sig_high > 0 else 0.0
+            calc_stop_loss = round(sig_high * (1 - sig_sl_pct / 100.0), 2) if sig_high > 0 else 0.0
+
             output.append({
                 "id": sig.id,
                 "company_id": sig.company_id,
                 "trading_symbol": comp.trading_symbol,
                 "security_id": comp.dhan_security_id,
                 "company_name": comp.company_name,
+                "strategy_type": sig.strategy_type or "SUPERTREND",
                 "signal_date": str(sig.date),
                 "signal_high": raw.get("signal_high"),
                 "signal_low": raw.get("signal_low"),
@@ -142,12 +160,16 @@ def get_signals_from_db(
                 "supertrend_flip": raw.get("supertrend_flip"),
                 "market_cap_cr": raw.get("market_cap_cr"),
                 "ref_price": raw.get("ref_price"),
+                "target_pct": sig_target_pct,
+                "sl_pct": sig_sl_pct,
+                "target_price": trade_target_price if trade_target_price else calc_target_price,
+                "stop_loss": trade_stop_price if trade_stop_price else calc_stop_loss,
                 "status": sig.status,
                 "rejection_reason": sig.rejection_reason,
                 "evaluation": raw.get("evaluation"),
-                "executed_price": trade.entry_price if trade else None,
-                "new_target_pct": trade.target_pct if trade else None,
-                "new_sl_pct": trade.stoploss_pct if trade else None,
+                "executed_price": getattr(trade, "entry_price", None) if trade else None,
+                "new_target_pct": trade_target_pct if trade_target_pct is not None else sig_target_pct,
+                "new_sl_pct": abs(trade_sl_pct) if trade_sl_pct is not None else sig_sl_pct,
                 "created_at": str(sig.created_at)
             })
         return output
@@ -155,16 +177,27 @@ def get_signals_from_db(
         db.close()
 
 
-def scan_signals_from_db() -> List[Dict[str, Any]]:
-    """Scan all active companies in DB for strategy signals."""
-    logger.info("[SIGNALS] Starting signal scan...")
+def scan_signals_from_db(target_date: Optional[date] = None) -> List[Dict[str, Any]]:
+    """Scan all active companies in DB for strategy signals for a specific target trading date."""
+    from market.calendar import is_trading_day
+
+    today = date.today()
+    if target_date is None:
+        # Default to latest completed trading day
+        target_date = today
+        if not is_trading_day(target_date):
+            for d_offset in range(1, 10):
+                check_d = today - timedelta(days=d_offset)
+                if is_trading_day(check_d):
+                    target_date = check_d
+                    break
+
+    logger.info(f"[SIGNALS] Starting signal scan for target_date={target_date}...")
 
     # Expire any PENDING signals older than the previous trading day
-    today = date.today()
-    from market.calendar import is_trading_day
-    min_valid_date = today - timedelta(days=5)
+    min_valid_date = target_date - timedelta(days=5)
     for d_offset in range(1, 10):
-        check_d = today - timedelta(days=d_offset)
+        check_d = target_date - timedelta(days=d_offset)
         if is_trading_day(check_d):
             min_valid_date = check_d
             break
@@ -215,7 +248,7 @@ def scan_signals_from_db() -> List[Dict[str, Any]]:
             return []
 
         # 2. Single fast SQL join to fetch daily candles (last 730 days for full RMA warm-up)
-        cutoff_daily = date.today() - timedelta(days=730)
+        cutoff_daily = target_date - timedelta(days=730)
         daily_rows = db.execute(
             text(
                 "SELECT d.company_id, d.date, d.open, d.high, d.low, d.close, d.volume "
@@ -240,7 +273,7 @@ def scan_signals_from_db() -> List[Dict[str, Any]]:
 
         for cid, comp in comp_map.items():
             daily = daily_by_comp.get(cid, [])
-            if len(daily) < 22:
+            if len(daily) < 22 or daily[-1]["date"] != target_date:
                 continue
 
             symbol = comp["symbol"]
@@ -282,7 +315,19 @@ def scan_signals_from_db() -> List[Dict[str, Any]]:
 
             # 2. Evaluate Monthly RSI Strategy
             try:
-                monthly_candles = get_monthly_candles_from_db(cid, limit=30)
+                # Aggregate monthly candles from pre-fetched daily candles in-memory
+                monthly_map = {}
+                for r in daily:
+                    month_key = r["date"].strftime("%Y-%m")
+                    if month_key not in monthly_map:
+                        monthly_map[month_key] = {"date": r["date"], "open": r["open"], "high": r["high"], "low": r["low"], "close": r["close"], "volume": r["volume"]}
+                    else:
+                        monthly_map[month_key]["high"] = max(monthly_map[month_key]["high"], r["high"])
+                        monthly_map[month_key]["low"] = min(monthly_map[month_key]["low"], r["low"])
+                        monthly_map[month_key]["close"] = r["close"]
+                        monthly_map[month_key]["volume"] += r["volume"]
+                monthly_candles = sorted(monthly_map.values(), key=lambda x: x["date"])
+
                 if len(monthly_candles) >= 14:
                     m_signal = evaluate_monthly_rsi_signal(
                         symbol=symbol,
