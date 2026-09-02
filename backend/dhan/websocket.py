@@ -39,6 +39,11 @@ class MarketFeedManager:
         self._running = False
         self._lock = asyncio.Lock()
         self._connect_task: Optional[asyncio.Task] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
 
     def register_tick_callback(self, callback: Callable) -> None:
         """Register a coroutine or callable: callback(security_id: str, ltp: float)."""
@@ -49,6 +54,10 @@ class MarketFeedManager:
         """Start the persistent connection loop."""
         if self._running:
             return
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
         self._running = True
         self._connect_task = asyncio.create_task(self._connection_loop())
         logger.info("[WS] Market feed manager started")
@@ -294,3 +303,24 @@ async def restart_market_feed_manager() -> None:
     mgr = get_market_feed_manager()
     if mgr:
         await mgr.restart()
+
+
+def trigger_market_feed_reconnect() -> None:
+    """Thread-safe non-blocking trigger to reconnect MarketFeed WebSocket immediately with fresh token."""
+    mgr = get_market_feed_manager()
+    if not mgr:
+        return
+    try:
+        loop = getattr(mgr, "_loop", None)
+        if loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(mgr.restart(), loop)
+        else:
+            try:
+                cur_loop = asyncio.get_running_loop()
+                if cur_loop.is_running():
+                    cur_loop.create_task(mgr.restart())
+            except RuntimeError:
+                pass
+    except Exception as exc:
+        logger.warning(f"[WS] Failed to trigger market feed reconnect: {exc}")
+

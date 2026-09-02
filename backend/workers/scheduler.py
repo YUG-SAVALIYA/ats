@@ -486,8 +486,15 @@ def scheduled_325_execution():
         logger.error(f"[SCHEDULER] 3:25 PM Execution failed: {exc}")
 
 
+_last_candle_sync_status = {
+    "date": None,
+    "success": False
+}
+
+
 def scheduled_post_market_candle_sync():
     """Runs post-market full candle sync at 3:46 PM."""
+    global _last_candle_sync_status
     now = datetime.now()
     if not is_trading_day(now.date()):
         logger.info(f"[SCHEDULER] Skipping post-market candle sync because {now.date()} is not a trading day.")
@@ -496,8 +503,10 @@ def scheduled_post_market_candle_sync():
     logger.info("[SCHEDULER] Triggering post-market candle sync at 3:46 PM...")
     try:
         sync_all_active_companies(limit=4000)
-        logger.info("[SCHEDULER] Post-market candle sync completed.")
+        _last_candle_sync_status = {"date": now.date(), "success": True}
+        logger.info("[SCHEDULER] Post-market candle sync completed successfully.")
     except Exception as exc:
+        _last_candle_sync_status = {"date": now.date(), "success": False}
         logger.error(f"[SCHEDULER] Post-market candle sync failed: {exc}")
 
 
@@ -520,18 +529,25 @@ def scheduled_post_market_signal_scan():
 
 
 def scheduled_full_candle_sync():
-    """Runs full candle sync at 10:00 PM."""
+    """Runs fallback full candle sync at 10:00 PM ONLY if 3:46 PM sync failed or did not run."""
+    global _last_candle_sync_status
     now = datetime.now()
     if not is_trading_day(now.date()):
         logger.info(f"[SCHEDULER] Skipping full candle sync because {now.date()} is not a trading day.")
         return
-        
-    logger.info("[SCHEDULER] Triggering scheduled full candle sync...")
+
+    # Check if 3:46 PM post-market candle sync already succeeded for today
+    if _last_candle_sync_status.get("date") == now.date() and _last_candle_sync_status.get("success") is True:
+        logger.info(f"[SCHEDULER 10:00 PM] Skipping 10:00 PM full candle sync because 3:46 PM sync already completed successfully for {now.date()}.")
+        return
+
+    logger.warning(f"[SCHEDULER 10:00 PM] 3:46 PM sync failed or did not run for {now.date()}. Running fallback 10:00 PM candle sync...")
     try:
         result = sync_all_active_companies(limit=4000)
-        logger.info(f"[SCHEDULER] Scheduled full sync complete: {result}")
+        _last_candle_sync_status = {"date": now.date(), "success": True}
+        logger.info(f"[SCHEDULER 10:00 PM] Fallback full candle sync completed: {result}")
     except Exception as exc:
-        logger.error(f"[SCHEDULER] Scheduled full sync failed: {exc}")
+        logger.error(f"[SCHEDULER 10:00 PM] Fallback full candle sync failed: {exc}")
 
 
 def scheduled_pre_market_auth_and_scrip_sync():
@@ -631,7 +647,7 @@ def start_scheduler():
         scheduled_full_candle_sync,
         trigger=CronTrigger(day_of_week="mon-fri", hour=22, minute=0, timezone=IST),
         id="sync_candles_2200",
-        name="Candle Sync at 10:00 PM",
+        name="Fallback Candle Sync at 10:00 PM (Only if 3:46 PM failed)",
         replace_existing=True
     )
     

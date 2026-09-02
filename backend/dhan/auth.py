@@ -296,6 +296,13 @@ class DhanAuthManager:
         except Exception:
             pass
 
+        # Automatically trigger MarketFeed WebSocket reconnect with the fresh token
+        try:
+            from dhan.websocket import trigger_market_feed_reconnect
+            trigger_market_feed_reconnect()
+        except Exception:
+            pass
+
 
 def refresh_all_broker_tokens() -> Dict[str, bool]:
     """Iterates through all configured broker accounts in `creds` DB table and generates fresh tokens."""
