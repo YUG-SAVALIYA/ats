@@ -3,7 +3,11 @@ import { Lock, Unlock, KeyRound, ShieldCheck } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { API_BASE } from '../services/api';
 
-export function LockScreen() {
+interface LockScreenProps {
+  onUnlock?: (token: string) => void;
+}
+
+export function LockScreen({ onUnlock }: LockScreenProps) {
   const [isSetupMode, setIsSetupMode] = useState<boolean | null>(null);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -21,9 +25,8 @@ export function LockScreen() {
         setIsSetupMode(!data.is_setup);
       })
       .catch(err => {
-        addToast('Failed to connect to backend', 'error');
-        // Stop spinning if it fails
-        setIsSetupMode(true); 
+        // If status fails, assume password is set up for security
+        setIsSetupMode(false); 
       });
   }, [addToast]);
 
@@ -75,8 +78,12 @@ export function LockScreen() {
         
         const data = await res.json();
         localStorage.setItem('ats_admin_token', data.access_token);
-        addToast('Unlocked successfully', 'success');
-        window.location.href = '/';
+        addToast('Terminal unlocked successfully', 'success');
+        if (onUnlock) {
+          onUnlock(data.access_token);
+        } else {
+          window.location.href = '/';
+        }
       }
     } catch (err: any) {
       addToast(err.message, 'error');

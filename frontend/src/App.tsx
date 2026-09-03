@@ -28,6 +28,7 @@ import { Settings } from './pages/Settings';
 import { Layers, FileText, History, Database } from 'lucide-react';
 
 function AppContent() {
+  const [authToken, setAuthToken] = useState<string | null>(() => localStorage.getItem('ats_admin_token'));
   const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
   const [engineStatus, setEngineStatus] = useState<EngineStatus | null>(null);
   const [signals, setSignals] = useState<StrategySignal[]>([]);
@@ -64,7 +65,17 @@ function AppContent() {
   const isFetchingRef = useRef(false);
   const { addToast } = useToast();
 
+  const handleLock = () => {
+    localStorage.removeItem('ats_admin_token');
+    setAuthToken(null);
+    addToast('Terminal locked', 'info');
+  };
+
   const syncAccountData = useCallback(async () => {
+    if (!localStorage.getItem('ats_admin_token')) {
+      setAuthToken(null);
+      return;
+    }
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
     setIsSyncing(true);
@@ -93,6 +104,11 @@ function AppContent() {
       addToast('Account portfolio synced cleanly from Dhan HQ API & DB', 'success', 'Portfolio Synced', 2500);
     } catch (err: any) {
       console.error('Account sync error:', err);
+      if (err.status === 401 || err.status === 403) {
+        localStorage.removeItem('ats_admin_token');
+        setAuthToken(null);
+        return;
+      }
       const msg = err.message || 'Failed to sync Dhan account portfolio';
       setSyncError(msg);
       addToast(msg, 'error', 'Sync Failed');
@@ -103,6 +119,8 @@ function AppContent() {
   }, [addToast, activeStrategy]);
 
   useEffect(() => {
+    if (!authToken) return;
+
     // Initial fetch on page mount / browser refresh
     syncAccountData();
 
@@ -125,7 +143,18 @@ function AppContent() {
     }, 60000);
 
     return () => clearInterval(minuteInterval);
-  }, [syncAccountData]);
+  }, [authToken, syncAccountData]);
+
+  if (!authToken) {
+    return (
+      <LockScreen
+        onUnlock={(token) => {
+          localStorage.setItem('ats_admin_token', token);
+          setAuthToken(token);
+        }}
+      />
+    );
+  }
 
   return (
     <div className={`min-h-screen flex flex-col font-['Outfit'] transition-colors duration-300 ${
@@ -140,6 +169,7 @@ function AppContent() {
         openTradesCount={positions.length}
         theme={theme}
         onToggleTheme={handleToggleTheme}
+        onLock={handleLock}
       />
 
       {/* Main Content Area */}

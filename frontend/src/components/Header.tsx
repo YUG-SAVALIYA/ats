@@ -1,6 +1,6 @@
 import React from 'react';
 import { AuthStatus } from '../types';
-import { ShieldCheck, RefreshCw, Zap, LayoutDashboard, Activity, TrendingUp, Sun, Moon } from 'lucide-react';
+import { ShieldCheck, RefreshCw, Zap, LayoutDashboard, Activity, TrendingUp, Sun, Moon, Lock } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { Settings as SettingsIcon } from 'lucide-react';
 import { useStrategy } from '../context/StrategyContext';
@@ -13,6 +13,7 @@ interface HeaderProps {
   openTradesCount: number;
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
+  onLock?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -23,6 +24,7 @@ export const Header: React.FC<HeaderProps> = ({
   openTradesCount,
   theme,
   onToggleTheme,
+  onLock,
 }) => {
   const isLight = theme === 'light';
   const location = useLocation();
@@ -187,6 +189,21 @@ export const Header: React.FC<HeaderProps> = ({
             <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
             <span>{isSyncing ? 'Syncing...' : 'Sync Account'}</span>
           </button>
+
+          {/* Lock System Button */}
+          {onLock && (
+            <button
+              onClick={onLock}
+              title="Lock ATS Terminal (Logout)"
+              className={`p-2 rounded-xl border transition-all hover:scale-105 ${
+                isLight
+                  ? 'bg-rose-50 hover:bg-rose-100 border-rose-200 text-rose-700'
+                  : 'bg-zinc-900 hover:bg-zinc-800 border-zinc-800 text-zinc-300 hover:text-rose-400'
+              }`}
+            >
+              <Lock className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
     </header>
