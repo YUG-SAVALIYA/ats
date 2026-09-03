@@ -188,6 +188,7 @@ def trigger_symbol_candle_sync(symbol: str, db: Session = Depends(get_db), curre
         company_id=company.id,
         security_id=company.dhan_security_id,
         exchange_segment=company.segment or "NSE_EQ",
-        force_full=True
+        force_full=True,
+        symbol=company.trading_symbol
     )
     return result

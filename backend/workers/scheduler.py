@@ -511,17 +511,15 @@ def scheduled_post_market_candle_sync():
 
 
 def scheduled_post_market_signal_scan():
-    """Runs post-market signal scanning at 7:00 PM (syncing fresh daily candles first)."""
+    """Runs post-market signal scanning at 7:00 PM directly from database."""
     now = datetime.now()
     if not is_trading_day(now.date()):
         logger.info(f"[SCHEDULER] Skipping signal scan because {now.date()} is not a trading day.")
         return
 
-    logger.info("[SCHEDULER] Triggering post-market candle sync and signal scan at 7:00 PM...")
+    logger.info("[SCHEDULER] Triggering post-market signal scan at 7:00 PM...")
     try:
-        # 1. Sync fresh daily candles from Dhan for eligible universe
-        sync_all_active_companies(limit=1000)
-        # 2. Run signal scan for today's market close
+        # Run signal scan directly from DB (candles were already synced at 3:46 PM)
         new_signals = scan_signals_from_db(target_date=now.date())
         logger.info(f"[SCHEDULER] Post-market signal scan completed: {len(new_signals)} new signals found.")
     except Exception as exc:

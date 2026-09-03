@@ -28,7 +28,7 @@ SYMBOL_FETCH_DELAY_SEC = 0.5  # Rate limit: 0.5s delay per symbol
 
 
 def get_latest_candle_date_from_db(company_id: str) -> Optional[date]:
-    """Returns the latest daily candle date stored in DB for a company."""
+    """Returns the latest daily candle date stored in DB for a company. Propagates DB errors."""
     db = SessionLocal()
     try:
         latest = (
@@ -37,8 +37,9 @@ def get_latest_candle_date_from_db(company_id: str) -> Optional[date]:
             .scalar()
         )
         return latest
-    except Exception:
-        return None
+    except Exception as exc:
+        logger.exception(f"[CANDLE SYNC] Database error fetching latest candle date for company_id={company_id}: {exc}")
+        raise
     finally:
         db.close()
 
@@ -52,6 +53,8 @@ def _upsert_daily_candles(db, company_id: str, candles: List[Dict[str, Any]]) ->
 
     inserted = 0
     updated = 0
+    skipped_non_trading = 0
+
     for c in candles:
         c_date = c["date"]
         if isinstance(c_date, str):
@@ -59,6 +62,7 @@ def _upsert_daily_candles(db, company_id: str, candles: List[Dict[str, Any]]) ->
 
         # Strictly ignore Saturdays (5), Sundays (6), and Indian market holidays
         if c_date.weekday() in (5, 6) or not is_trading_day(c_date):
+            skipped_non_trading += 1
             continue
 
         if c_date in existing:
@@ -84,18 +88,37 @@ def _upsert_daily_candles(db, company_id: str, candles: List[Dict[str, Any]]) ->
             inserted += 1
 
     db.commit()
-    return {"inserted": inserted, "updated": updated}
+    return {
+        "received": len(candles),
+        "inserted": inserted,
+        "updated": updated,
+        "skipped_non_trading": skipped_non_trading
+    }
 
 
 def sync_candles_for_company(
     company_id: str,
     security_id: str,
     exchange_segment: str = "NSE_EQ",
-    force_full: bool = False
+    force_full: bool = False,
+    symbol: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Detects missing candles for a company and selectively fetches missing dates from Dhan API.
     """
+    # Auto-resolve symbol from DB if not supplied by caller
+    if not symbol:
+        db_sym = SessionLocal()
+        try:
+            comp_obj = db_sym.query(Company.trading_symbol).filter(Company.id == company_id).first()
+            if comp_obj and comp_obj[0]:
+                symbol = comp_obj[0]
+        except Exception:
+            pass
+        finally:
+            db_sym.close()
+
+    sym_label = symbol or company_id
     today = date.today()
     latest_db_date = get_latest_candle_date_from_db(company_id)
 
@@ -106,37 +129,50 @@ def sync_candles_for_company(
             from_date = latest_db_date.strftime("%Y-%m-%d")
         else:
             from_date = lookback_date.strftime("%Y-%m-%d")
-            
         to_date = today.strftime("%Y-%m-%d")
-        logger.info(f"[CANDLE SYNC] 5-Day Gap Check for sec_id={security_id}. Fetching {from_date} to {to_date}...")
+        logger.info(f"[CANDLE SYNC] {sym_label} (sec_id={security_id}): 5-Day Gap Check. Fetching {from_date} to {to_date} (latest_db={latest_db_date})...")
     else:
         from_date = (today - timedelta(days=365)).strftime("%Y-%m-%d")
         to_date = today.strftime("%Y-%m-%d")
-        logger.info(f"[CANDLE SYNC] Initializing full candle sync for sec_id={security_id} ({from_date} to {to_date})...")
+        logger.info(f"[CANDLE SYNC] {sym_label} (sec_id={security_id}): Initializing full candle sync ({from_date} to {to_date})...")
 
-    candles = fetch_historical_ohlcv(security_id, exchange_segment, from_date, to_date)
+    candles = fetch_historical_ohlcv(security_id, exchange_segment, from_date, to_date, symbol=symbol)
     if not candles:
-        logger.warning(f"[CANDLE SYNC] No new data returned from Dhan for security_id={security_id}")
-        return {"daily_inserted": 0, "daily_updated": 0, "weekly_inserted": 0, "skipped": False}
+        logger.info(f"[CANDLE SYNC] {sym_label} (sec_id={security_id}): No new candles returned from Dhan for range {from_date} to {to_date}")
+        return {
+            "daily_inserted": 0,
+            "daily_updated": 0,
+            "weekly_inserted": 0,
+            "skipped_non_trading": 0,
+            "skipped": False
+        }
 
     db = SessionLocal()
     daily_inserted = 0
     daily_updated = 0
     weekly_inserted = 0
+    skipped_non_trading = 0
 
     try:
         counts = _upsert_daily_candles(db, company_id, candles)
         daily_inserted = counts.get("inserted", 0)
         daily_updated = counts.get("updated", 0)
-        logger.info(f"[CANDLE SYNC] {security_id}: {daily_inserted} new daily candles stored, {daily_updated} updated in DB")
+        skipped_non_trading = counts.get("skipped_non_trading", 0)
 
         agg_result = aggregate_weekly_candles(company_id=company_id)
         weekly_inserted = agg_result.get("processed_rows", 0)
-        logger.info(f"[CANDLE SYNC] {security_id}: {weekly_inserted} weekly candles updated natively")
+
+        logger.info(
+            f"[CANDLE SYNC] {sym_label} (sec_id={security_id}): range={from_date}..{to_date} | "
+            f"received={counts.get('received', len(candles))} | inserted={daily_inserted} | "
+            f"updated={daily_updated} | skipped_non_trading={skipped_non_trading} | "
+            f"weekly_updated={weekly_inserted}"
+        )
 
     except Exception as exc:
         db.rollback()
-        logger.error(f"[CANDLE SYNC] DB error for company_id={company_id}: {exc}")
+        logger.exception(f"[CANDLE SYNC] DB error saving candles for {sym_label} (company_id={company_id}): {exc}")
+        raise
     finally:
         db.close()
 
@@ -144,6 +180,7 @@ def sync_candles_for_company(
         "daily_inserted": daily_inserted,
         "daily_updated": daily_updated,
         "weekly_inserted": weekly_inserted,
+        "skipped_non_trading": skipped_non_trading,
         "skipped": False
     }
 
@@ -188,7 +225,8 @@ def sync_actionable_companies(delay_sec: float = SYMBOL_FETCH_DELAY_SEC) -> Dict
             result = sync_candles_for_company(
                 company_id=company.id,
                 security_id=company.dhan_security_id,
-                exchange_segment="NSE_EQ"
+                exchange_segment="NSE_EQ",
+                symbol=company.trading_symbol
             )
             if result.get("skipped"):
                 skipped += 1
@@ -245,7 +283,8 @@ def sync_all_active_companies(limit: int = 4000, delay_sec: float = SYMBOL_FETCH
             result = sync_candles_for_company(
                 company_id=company.id,
                 security_id=company.dhan_security_id,
-                exchange_segment="NSE_EQ"
+                exchange_segment="NSE_EQ",
+                symbol=company.trading_symbol
             )
             if result.get("skipped"):
                 skipped += 1

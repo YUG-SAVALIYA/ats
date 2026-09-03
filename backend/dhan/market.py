@@ -10,7 +10,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
-from dhan.client import get_dhan_data_client
+from dhan.client import get_dhan_data_client, is_error_response
 from dhan.endpoints import MARKET_HISTORICAL_CHARTS_URL, SCRIP_MASTER_CSV_URL
 
 logger = logging.getLogger("ats.dhan.market")
@@ -45,19 +45,39 @@ def fetch_historical_ohlcv(
         "fromDate": from_date,
         "toDate": to_date
     }
+    sym_str = f" ({symbol})" if symbol else ""
+    current_sec_id = str(security_id)
+
     try:
         data = client.execute_v2_post(DHAN_HISTORY_URL, payload)
 
         # Market Hours Fallback: Auto-heal if invalid security ID
         if isinstance(data, dict) and is_invalid_security_error(data) and symbol:
-            logger.warning(f"[DHAN MARKET] Invalid Security ID '{security_id}' detected for {symbol}. Fetching new Scrip Master...")
+            logger.warning(
+                f"[DHAN MARKET] Invalid Security ID '{current_sec_id}' detected for {symbol} "
+                f"[{exchange_segment}, {from_date}..{to_date}]. Fetching fresh Scrip Master..."
+            )
             new_sec_id = auto_heal_security_id(symbol)
-            if new_sec_id and str(new_sec_id) != str(security_id):
-                logger.info(f"[DHAN MARKET] Retrying fetch for {symbol} with official ID {new_sec_id}...")
-                payload["securityId"] = str(new_sec_id)
+            if new_sec_id and str(new_sec_id) != current_sec_id:
+                logger.info(f"[DHAN MARKET] Retrying historical fetch for {symbol} with official ID {new_sec_id}...")
+                current_sec_id = str(new_sec_id)
+                payload["securityId"] = current_sec_id
                 data = client.execute_v2_post(DHAN_HISTORY_URL, payload)
 
         if not isinstance(data, dict):
+            logger.warning(
+                f"[DHAN MARKET] Unexpected non-dict response for sec_id={current_sec_id}{sym_str} "
+                f"[{exchange_segment}, {from_date}..{to_date}]: {data}"
+            )
+            return None
+
+        # Check for explicit API error response from Dhan
+        if is_error_response(data) or data.get("status") in ("failure", "failed", "error"):
+            err_msg = data.get("remarks") or data.get("message") or data.get("errorMessage") or data
+            logger.warning(
+                f"[DHAN MARKET] API error response for sec_id={current_sec_id}{sym_str} "
+                f"[{exchange_segment}, {from_date}..{to_date}]: {err_msg}"
+            )
             return None
 
         timestamps = data.get("timestamp", [])
@@ -68,12 +88,23 @@ def fetch_historical_ohlcv(
         volumes    = data.get("volume", [])
 
         if not timestamps or not closes:
+            logger.info(
+                f"[DHAN MARKET] No candle records returned for sec_id={current_sec_id}{sym_str} "
+                f"[{exchange_segment}, {from_date}..{to_date}]"
+            )
             return None
 
+        total_received = len(timestamps)
+        parsed_count = 0
+        skipped_parse_errors = 0
+        skipped_weekends = 0
         candles = []
-        for i in range(len(timestamps)):
+
+        for i in range(total_received):
+            ts = timestamps[i] if i < len(timestamps) else None
             try:
-                ts = timestamps[i]
+                if ts is None:
+                    raise ValueError(f"Missing timestamp at index {i}")
                 if isinstance(ts, (int, float)):
                     # Convert UTC epoch timestamp to IST date (+5:30)
                     candle_date = (datetime.utcfromtimestamp(ts) + timedelta(hours=5, minutes=30)).date()
@@ -82,22 +113,43 @@ def fetch_historical_ohlcv(
 
                 # Filter out Saturday (5) and Sunday (6) daily candles for NSE/BSE Equity
                 if candle_date.weekday() >= 5:
+                    skipped_weekends += 1
                     continue
+
+                open_val = float(opens[i]) if i < len(opens) and opens[i] is not None else 0.0
+                high_val = float(highs[i]) if i < len(highs) and highs[i] is not None else 0.0
+                low_val = float(lows[i]) if i < len(lows) and lows[i] is not None else 0.0
+                close_val = float(closes[i]) if i < len(closes) and closes[i] is not None else 0.0
+                vol_val = int(volumes[i]) if i < len(volumes) and volumes[i] is not None else 0
+
                 candles.append({
                     "date":   candle_date,
-                    "open":   float(opens[i]   if i < len(opens)   else 0),
-                    "high":   float(highs[i]   if i < len(highs)   else 0),
-                    "low":    float(lows[i]    if i < len(lows)    else 0),
-                    "close":  float(closes[i]  if i < len(closes)  else 0),
-                    "volume": int(volumes[i]   if i < len(volumes) else 0),
+                    "open":   open_val,
+                    "high":   high_val,
+                    "low":    low_val,
+                    "close":  close_val,
+                    "volume": vol_val,
                 })
-            except Exception:
+                parsed_count += 1
+            except Exception as parse_err:
+                skipped_parse_errors += 1
+                logger.warning(
+                    f"[DHAN MARKET] Malformed candle at index {i} (ts={ts}) for sec_id={current_sec_id}{sym_str}: {parse_err}"
+                )
                 continue
+
+        logger.info(
+            f"[DHAN MARKET] sec_id={current_sec_id}{sym_str} [{from_date}..{to_date}]: "
+            f"received={total_received}, parsed={parsed_count}, skipped_weekend={skipped_weekends}, parse_errors={skipped_parse_errors}"
+        )
 
         return candles
 
     except Exception as exc:
-        logger.warning(f"[DHAN MARKET] Fetch historical error for sec_id={security_id}: {exc}")
+        logger.exception(
+            f"[DHAN MARKET] Fetch historical exception for sec_id={current_sec_id}{sym_str} "
+            f"[{exchange_segment}, {from_date}..{to_date}]: {exc}"
+        )
         return None
 
 
