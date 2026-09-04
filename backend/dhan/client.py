@@ -8,6 +8,7 @@ error response parsing, and singletons for TradeAccount (execution) and DataAcco
 from __future__ import annotations
 
 import logging
+import time
 import requests
 import threading
 from typing import Optional, Any, Dict, List
@@ -21,6 +22,25 @@ logger = logging.getLogger("ats.dhan.client")
 _trade_client_instance: Optional[DhanClient] = None
 _data_client_instance: Optional[DhanClient] = None
 _lock = threading.Lock()
+
+
+class DhanRateLimiter:
+    """Thread-safe rate limiter strictly enforcing Dhan API 5 req/s limit across all workers."""
+    def __init__(self, max_per_second: float = 4.5):
+        self.lock = threading.Lock()
+        self.interval = 1.0 / max_per_second
+        self.last_call = 0.0
+
+    def acquire(self):
+        with self.lock:
+            now = time.time()
+            elapsed = now - self.last_call
+            if elapsed < self.interval:
+                time.sleep(self.interval - elapsed)
+            self.last_call = time.time()
+
+
+_global_rate_limiter = DhanRateLimiter(max_per_second=4.5)
 
 
 class _ClientConfig:
@@ -82,7 +102,13 @@ class DhanClient:
         }
         
         try:
+            _global_rate_limiter.acquire()
             resp = requests.get(endpoint_url, headers=headers, timeout=12)
+            if resp.status_code == 429:
+                logger.warning(f"[CLIENT][{self.account_label}] Dhan 429 Rate Limit encountered for GET {endpoint_url}. Throttling for 1.0s and retrying...")
+                time.sleep(1.0)
+                _global_rate_limiter.acquire()
+                resp = requests.get(endpoint_url, headers=headers, timeout=12)
         except Exception as exc:
             logger.error(f"[CLIENT][{self.account_label}] Request exception for {endpoint_url}: {exc}")
             return {"status": "failure", "remarks": f"Network Error: {exc}", "http_code": 503}
@@ -95,6 +121,7 @@ class DhanClient:
                 headers["access-token"] = new_token or ""
                 headers["client-id"] = self.client_id or ""
                 try:
+                    _global_rate_limiter.acquire()
                     resp = requests.get(endpoint_url, headers=headers, timeout=12)
                 except Exception as exc:
                     return {"status": "failure", "remarks": f"Network Error: {exc}", "http_code": 503}
@@ -129,7 +156,13 @@ class DhanClient:
         }
         
         try:
+            _global_rate_limiter.acquire()
             resp = requests.post(endpoint_url, json=payload, headers=headers, timeout=12)
+            if resp.status_code == 429:
+                logger.warning(f"[CLIENT][{self.account_label}] Dhan 429 Rate Limit encountered for POST {endpoint_url}. Throttling for 1.0s and retrying...")
+                time.sleep(1.0)
+                _global_rate_limiter.acquire()
+                resp = requests.post(endpoint_url, json=payload, headers=headers, timeout=12)
         except Exception as exc:
             logger.error(f"[CLIENT][{self.account_label}] POST exception for {endpoint_url}: {exc}")
             return {"status": "failure", "remarks": f"Network Error: {exc}", "http_code": 503}
@@ -142,6 +175,7 @@ class DhanClient:
                 headers["access-token"] = new_token or ""
                 headers["client-id"] = self.client_id or ""
                 try:
+                    _global_rate_limiter.acquire()
                     resp = requests.post(endpoint_url, json=payload, headers=headers, timeout=12)
                 except Exception as exc:
                     return {"status": "failure", "remarks": f"Network Error: {exc}", "http_code": 503}

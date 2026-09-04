@@ -236,4 +236,7 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ security_id: securityId, quantity }),
   }),
+
+  // Company Images
+  getCompanyImages: () => fetchJson<Record<string, string>>('/companies/images'),
 };

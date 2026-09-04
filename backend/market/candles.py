@@ -12,6 +12,7 @@ import logging
 import uuid
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Any, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from sqlalchemy import func
 from database.database import SessionLocal
@@ -24,7 +25,7 @@ from market.calendar import is_trading_day
 
 logger = logging.getLogger("ats.market.candles")
 
-SYMBOL_FETCH_DELAY_SEC = 0.5  # Rate limit: 0.5s delay per symbol
+SYMBOL_FETCH_DELAY_SEC = 0.0  # Zero delay as requested
 
 
 def get_latest_candle_date_from_db(company_id: str) -> Optional[date]:
@@ -101,7 +102,8 @@ def sync_candles_for_company(
     security_id: str,
     exchange_segment: str = "NSE_EQ",
     force_full: bool = False,
-    symbol: Optional[str] = None
+    symbol: Optional[str] = None,
+    aggregate_weekly: bool = True
 ) -> Dict[str, Any]:
     """
     Detects missing candles for a company and selectively fetches missing dates from Dhan API.
@@ -120,6 +122,7 @@ def sync_candles_for_company(
 
     sym_label = symbol or company_id
     today = date.today()
+    tomorrow = today + timedelta(days=1)  # Dhan toDate is exclusive, so use tomorrow to include today
     latest_db_date = get_latest_candle_date_from_db(company_id)
 
     if not force_full and latest_db_date:
@@ -129,11 +132,11 @@ def sync_candles_for_company(
             from_date = latest_db_date.strftime("%Y-%m-%d")
         else:
             from_date = lookback_date.strftime("%Y-%m-%d")
-        to_date = today.strftime("%Y-%m-%d")
+        to_date = tomorrow.strftime("%Y-%m-%d")
         logger.info(f"[CANDLE SYNC] {sym_label} (sec_id={security_id}): 5-Day Gap Check. Fetching {from_date} to {to_date} (latest_db={latest_db_date})...")
     else:
         from_date = (today - timedelta(days=365)).strftime("%Y-%m-%d")
-        to_date = today.strftime("%Y-%m-%d")
+        to_date = tomorrow.strftime("%Y-%m-%d")
         logger.info(f"[CANDLE SYNC] {sym_label} (sec_id={security_id}): Initializing full candle sync ({from_date} to {to_date})...")
 
     candles = fetch_historical_ohlcv(security_id, exchange_segment, from_date, to_date, symbol=symbol)
@@ -159,8 +162,9 @@ def sync_candles_for_company(
         daily_updated = counts.get("updated", 0)
         skipped_non_trading = counts.get("skipped_non_trading", 0)
 
-        agg_result = aggregate_weekly_candles(company_id=company_id)
-        weekly_inserted = agg_result.get("processed_rows", 0)
+        if aggregate_weekly:
+            agg_result = aggregate_weekly_candles(company_id=company_id)
+            weekly_inserted = agg_result.get("processed_rows", 0)
 
         logger.info(
             f"[CANDLE SYNC] {sym_label} (sec_id={security_id}): range={from_date}..{to_date} | "
@@ -185,12 +189,15 @@ def sync_candles_for_company(
     }
 
 
-def sync_actionable_companies(delay_sec: float = SYMBOL_FETCH_DELAY_SEC) -> Dict[str, Any]:
+def sync_actionable_companies(
+    delay_sec: float = SYMBOL_FETCH_DELAY_SEC,
+    max_workers: int = 5
+) -> Dict[str, Any]:
     """
     Checks missing candles and fetches updates ONLY for companies with active signals or open/pending trades.
-    Intended for 3:20 PM fast pre-market-execution sync.
+    Intended for 3:20 PM fast pre-market-execution sync. Uses concurrent workers.
     """
-    logger.info("[CANDLE SYNC] Starting fast actionable candle sync...")
+    logger.info(f"[CANDLE SYNC] Starting fast actionable candle sync (Workers: {max_workers}, Delay: {delay_sec}s)...")
     from database.models import Signal, Trade
     db = SessionLocal()
     try:
@@ -220,26 +227,52 @@ def sync_actionable_companies(delay_sec: float = SYMBOL_FETCH_DELAY_SEC) -> Dict
     synced = 0
     skipped = 0
 
-    for company in companies:
+    def _act_worker(c_tuple):
+        cid, sid, sym = c_tuple
         try:
             result = sync_candles_for_company(
-                company_id=company.id,
-                security_id=company.dhan_security_id,
+                company_id=cid,
+                security_id=sid,
                 exchange_segment="NSE_EQ",
-                symbol=company.trading_symbol
+                symbol=sym,
+                aggregate_weekly=False
             )
-            if result.get("skipped"):
-                skipped += 1
-            else:
-                total_daily += result.get("daily_inserted", 0)
-                total_weekly += result.get("weekly_inserted", 0)
-                synced += 1
-
             if delay_sec > 0:
                 time.sleep(delay_sec)
-
+            if result.get("skipped"):
+                return False, 0
+            daily_count = result.get("daily_inserted", 0) + result.get("daily_updated", 0)
+            return True, daily_count
         except Exception as exc:
-            logger.warning(f"[CANDLE SYNC] Skipping {company.trading_symbol}: {exc}")
+            logger.warning(f"[CANDLE SYNC] Skipping {sym}: {exc}")
+            return False, 0
+
+    c_tuples = [(c.id, c.dhan_security_id, c.trading_symbol) for c in companies]
+
+    if max_workers > 1:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_c = {executor.submit(_act_worker, ct): ct for ct in c_tuples}
+            for future in as_completed(future_to_c):
+                ok, d_count = future.result()
+                if ok:
+                    synced += 1
+                    total_daily += d_count
+                else:
+                    skipped += 1
+    else:
+        for ct in c_tuples:
+            ok, d_count = _act_worker(ct)
+            if ok:
+                synced += 1
+                total_daily += d_count
+            else:
+                skipped += 1
+
+    try:
+        agg_res = aggregate_weekly_candles(company_id=None)
+        total_weekly = agg_res.get("processed_rows", 0)
+    except Exception as exc:
+        logger.warning(f"[CANDLE SYNC] Weekly aggregation notice in actionable sync: {exc}")
 
     summary = {
         "total_actionable_companies": len(companies),
@@ -247,17 +280,27 @@ def sync_actionable_companies(delay_sec: float = SYMBOL_FETCH_DELAY_SEC) -> Dict
         "companies_skipped_up_to_date": skipped,
         "daily_candles_inserted": total_daily,
         "weekly_candles_inserted": total_weekly,
-        "rate_limit_delay_sec": delay_sec
+        "rate_limit_delay_sec": delay_sec,
+        "workers": max_workers
     }
     logger.info(f"[CANDLE SYNC] Fast actionable sync complete: {summary}")
     return summary
 
 
-def sync_all_active_companies(limit: int = 4000, delay_sec: float = SYMBOL_FETCH_DELAY_SEC) -> Dict[str, Any]:
+def sync_all_active_companies(
+    limit: int = 4000,
+    batch_size: int = 200,
+    delay_sec: float = SYMBOL_FETCH_DELAY_SEC,
+    max_workers: int = 5,
+    delay_between_batches_sec: float = 2.0
+) -> Dict[str, Any]:
     """
-    Checks missing candles and fetches updates for all active companies with a 0.3s rate limit per symbol.
+    Synchronizes daily candles for all active companies in clean batches of 200 symbols.
+    Uses 5 worker threads per batch, strictly governed by Dhan's 5 req/s rate limiter.
+    Takes a 2-second pause between batches for system/connection stability.
+    Runs batch weekly aggregation once at the end.
     """
-    logger.info(f"[CANDLE SYNC] Starting batch candle sync for up to {limit} active companies (Rate Limit: {delay_sec}s/symbol)...")
+    logger.info(f"[CANDLE SYNC] Starting candle sync for up to {limit} active companies in batches of {batch_size} (Workers: {max_workers})...")
     db = SessionLocal()
     try:
         companies = (
@@ -278,36 +321,99 @@ def sync_all_active_companies(limit: int = 4000, delay_sec: float = SYMBOL_FETCH
     synced = 0
     skipped = 0
 
-    for company in companies:
+    def _worker(company_tuple):
+        comp_id, sec_id, symbol = company_tuple
         try:
             result = sync_candles_for_company(
-                company_id=company.id,
-                security_id=company.dhan_security_id,
+                company_id=comp_id,
+                security_id=sec_id,
                 exchange_segment="NSE_EQ",
-                symbol=company.trading_symbol
+                symbol=symbol,
+                aggregate_weekly=False  # Defer weekly aggregation to single batch at the end!
             )
-            if result.get("skipped"):
-                skipped += 1
-            else:
-                total_daily += result.get("daily_inserted", 0)
-                total_weekly += result.get("weekly_inserted", 0)
-                synced += 1
-
             if delay_sec > 0:
                 time.sleep(delay_sec)
-
+            if result.get("skipped"):
+                return False, 0
+            daily_count = result.get("daily_inserted", 0) + result.get("daily_updated", 0)
+            return True, daily_count
         except Exception as exc:
-            logger.warning(f"[CANDLE SYNC] Skipping {company.trading_symbol}: {exc}")
+            logger.warning(f"[CANDLE SYNC] Skipping {symbol}: {exc}")
+            return False, 0
+
+    all_tuples = [(c.id, c.dhan_security_id, c.trading_symbol) for c in companies]
+    batches = [all_tuples[i:i + batch_size] for i in range(0, len(all_tuples), batch_size)]
+    total_batches = len(batches)
+
+    logger.info(f"[CANDLE SYNC] Split {len(all_tuples)} companies into {total_batches} batches of {batch_size} symbols.")
+
+    processed_so_far = 0
+    for b_idx, batch_tuples in enumerate(batches, 1):
+        batch_synced = 0
+        batch_skipped = 0
+        batch_daily = 0
+
+        logger.info(f"[CANDLE SYNC] --- Starting Batch {b_idx}/{total_batches} ({len(batch_tuples)} symbols) ---")
+
+        if max_workers > 1:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_tuple = {
+                    executor.submit(_worker, ct): ct
+                    for ct in batch_tuples
+                }
+                for future in as_completed(future_to_tuple):
+                    ok, d_count = future.result()
+                    if ok:
+                        synced += 1
+                        batch_synced += 1
+                        total_daily += d_count
+                        batch_daily += d_count
+                    else:
+                        skipped += 1
+                        batch_skipped += 1
+        else:
+            for ct in batch_tuples:
+                ok, d_count = _worker(ct)
+                if ok:
+                    synced += 1
+                    batch_synced += 1
+                    total_daily += d_count
+                    batch_daily += d_count
+                else:
+                    skipped += 1
+                    batch_skipped += 1
+
+        processed_so_far += len(batch_tuples)
+        logger.info(
+            f"[CANDLE SYNC] [Batch {b_idx}/{total_batches} COMPLETE] "
+            f"Synced: {batch_synced} | Skipped: {batch_skipped} | Inserted/Updated: {batch_daily} | "
+            f"Overall Progress: {processed_so_far}/{len(all_tuples)} companies."
+        )
+
+        # Pause between batches to give Dhan API and DB connection pool a clean breather
+        if delay_between_batches_sec > 0 and b_idx < total_batches:
+            time.sleep(delay_between_batches_sec)
+
+    # Run batch weekly candle aggregation once across all companies
+    try:
+        agg_res = aggregate_weekly_candles(company_id=None)
+        total_weekly = agg_res.get("processed_rows", 0)
+        logger.info(f"[CANDLE SYNC] Batch weekly aggregation complete: {agg_res}")
+    except Exception as exc:
+        logger.warning(f"[CANDLE SYNC] Batch weekly aggregation failed: {exc}")
 
     summary = {
         "total_active_companies": len(companies),
+        "total_batches": total_batches,
+        "batch_size": batch_size,
         "companies_synced": synced,
         "companies_skipped_up_to_date": skipped,
         "daily_candles_inserted": total_daily,
         "weekly_candles_inserted": total_weekly,
-        "rate_limit_delay_sec": delay_sec
+        "rate_limit_delay_sec": delay_sec,
+        "workers": max_workers
     }
-    logger.info(f"[CANDLE SYNC] Batch sync complete: {summary}")
+    logger.info(f"[CANDLE SYNC] All batches complete: {summary}")
     return summary
 
 

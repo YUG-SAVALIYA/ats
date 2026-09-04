@@ -11,13 +11,22 @@ export const CompanyImageProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [images, setImages] = useState<CompanyImageContextType>({});
 
   useEffect(() => {
-    fetch(`${API_BASE}/companies/images`)
-      .then(res => res.json())
+    api.getCompanyImages()
       .then(data => {
         setImages(data || {});
       })
       .catch(err => {
-        console.error("Failed to fetch company images:", err);
+        console.error("Failed to fetch company images via api client, trying public fallback:", err);
+        const token = localStorage.getItem('ats_admin_token');
+        fetch(`${API_BASE}/companies/images`, {
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          }
+        })
+          .then(res => res.json())
+          .then(data => setImages(data || {}))
+          .catch(e => console.error("Company images fallback also failed:", e));
       });
   }, []);
 

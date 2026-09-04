@@ -160,7 +160,7 @@ def get_stock_detail(symbol: str, db: Session = Depends(get_db), current_user: s
 
 
 @router.get("/api/companies/images")
-def get_company_images(db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+def get_company_images(db: Session = Depends(get_db)):
     """Retrieve map of trading_symbol to company logo URL."""
     rows = db.query(Company.trading_symbol, Company.img_url).filter(Company.img_url != None).all()
     return {symbol: url for symbol, url in rows}
